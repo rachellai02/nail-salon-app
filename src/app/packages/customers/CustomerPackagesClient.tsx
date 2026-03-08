@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CustomerFormDialog } from "@/components/CustomerFormDialog";
+import { formatDateMY } from "@/lib/utils";
 
 type Props = {
   initialCustomerPackages: CustomerPackage[];
@@ -121,9 +122,7 @@ export default function CustomerPackagesClient({
                 </TableCell>
                 <TableCell>{customer.contact_number}</TableCell>
                 <TableCell className="text-gray-500 text-sm">
-                  {customer.birthday
-                    ? new Date(customer.birthday).toLocaleDateString("en-MY")
-                    : "—"}
+                  {customer.birthday ? formatDateMY(customer.birthday) : "—"}
                 </TableCell>
                 <TableCell>{customerPkgs.filter((pkg) => pkg.remaining_uses > 0).length}</TableCell>
                 <TableCell>

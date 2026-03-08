@@ -9,6 +9,7 @@ import {
 } from "@/lib/actions";
 import type { ArchivedCustomer, ArchivedPackage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { formatDateMY, formatDateTimeMY } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -106,7 +107,7 @@ export default function ArchiveSwitcher({ archivedPackages, archivedCustomers }:
                   <TableCell>{pkg.total_uses}x</TableCell>
                   <TableCell>RM {Number(pkg.price).toFixed(2)}</TableCell>
                   <TableCell>{pkg.was_active ? "Active" : "Inactive"}</TableCell>
-                  <TableCell>{new Date(pkg.deleted_at).toLocaleString("en-MY")}</TableCell>
+                  <TableCell>{formatDateTimeMY(pkg.deleted_at)}</TableCell>
                   <TableCell>
                     <form action={restoreArchivedPackage.bind(null, pkg.id)}>
                       <Button size="sm" variant="outline" type="submit">
@@ -147,10 +148,8 @@ export default function ArchiveSwitcher({ archivedPackages, archivedCustomers }:
                     {customer.name}
                   </TableCell>
                   <TableCell>{customer.contact_number}</TableCell>
-                  <TableCell>
-                    {customer.birthday ? new Date(customer.birthday).toLocaleDateString("en-MY") : "-"}
-                  </TableCell>
-                  <TableCell>{new Date(customer.deleted_at).toLocaleString("en-MY")}</TableCell>
+                  <TableCell>{customer.birthday ? formatDateMY(customer.birthday) : "-"}</TableCell>
+                  <TableCell>{formatDateTimeMY(customer.deleted_at)}</TableCell>
                   <TableCell>
                     <form action={restoreArchivedCustomer.bind(null, customer.id)}>
                       <Button size="sm" variant="outline" type="submit">

@@ -5,6 +5,7 @@ import {
   restoreArchivedPackage,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
+import { formatDateTimeMY } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -72,7 +73,7 @@ export default async function ArchivedPackageTypesPage() {
                 <TableCell>{pkg.total_uses}x</TableCell>
                 <TableCell>RM {Number(pkg.price).toFixed(2)}</TableCell>
                 <TableCell>{pkg.was_active ? "Active" : "Inactive"}</TableCell>
-                <TableCell>{new Date(pkg.deleted_at).toLocaleString("en-MY")}</TableCell>
+                <TableCell>{formatDateTimeMY(pkg.deleted_at)}</TableCell>
                 <TableCell>
                   <form
                     action={async () => {

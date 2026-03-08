@@ -38,6 +38,7 @@ import {
 import { DeductUseDialog } from "@/components/DeductUseDialog";
 import { SellPackageDialog } from "@/components/SellPackageDialog";
 import { CustomerFormDialog } from "@/components/CustomerFormDialog";
+import { formatDateMY, formatDateTimeMY } from "@/lib/utils";
 
 type Props = {
   customer: Customer;
@@ -217,7 +218,7 @@ export default function CustomerDetailClient({
                 {customer.birthday && (
                   <p>
                     <span className="font-medium">Birthday:</span>{" "}
-                    {new Date(customer.birthday).toLocaleDateString("en-MY")}
+                    {formatDateMY(customer.birthday)}
                   </p>
                 )}
                 <p>
@@ -312,12 +313,10 @@ export default function CustomerDetailClient({
                     </Badge>
                   </TableCell>
                   <TableCell className="text-gray-500 text-sm">
-                    {new Date(cp.purchased_at).toLocaleDateString("en-MY")}
+                    {formatDateMY(cp.purchased_at)}
                   </TableCell>
                   <TableCell className="text-gray-500 text-sm">
-                    {cp.expiry_date
-                      ? new Date(cp.expiry_date).toLocaleDateString("en-MY")
-                      : "—"}
+                    {cp.expiry_date ? formatDateMY(cp.expiry_date) : "—"}
                   </TableCell>
                   <TableCell>
                     <Badge variant={isExpired ? "destructive" : "default"}>
@@ -421,17 +420,13 @@ export default function CustomerDetailClient({
                       </TableCell>
                       <TableCell className="font-medium whitespace-normal break-words max-w-[220px]">{cp.package?.name ?? "—"}</TableCell>
                       <TableCell className="text-gray-500 text-sm">
-                        {new Date(cp.purchased_at).toLocaleDateString("en-MY")}
+                        {formatDateMY(cp.purchased_at)}
                       </TableCell>
                       <TableCell className="text-gray-500 text-sm">
-                        {cp.completed_at
-                          ? new Date(cp.completed_at).toLocaleDateString("en-MY")
-                          : "—"}
+                        {cp.completed_at ? formatDateMY(cp.completed_at) : "—"}
                       </TableCell>
                       <TableCell className="text-gray-500 text-sm">
-                        {cp.expiry_date
-                          ? new Date(cp.expiry_date).toLocaleDateString("en-MY")
-                          : "—"}
+                        {cp.expiry_date ? formatDateMY(cp.expiry_date) : "—"}
                       </TableCell>
                       <TableCell>
                         <Badge variant={isExpired ? "destructive" : "secondary"}>
@@ -505,8 +500,8 @@ export default function CustomerDetailClient({
                     </TableCell>
                     <TableCell className="whitespace-normal break-words max-w-[220px]">{cp.package_name}</TableCell>
                     <TableCell>{cp.remaining_uses}</TableCell>
-                    <TableCell>{new Date(cp.purchased_at).toLocaleDateString("en-MY")}</TableCell>
-                    <TableCell>{new Date(cp.deleted_at).toLocaleString("en-MY")}</TableCell>
+                    <TableCell>{formatDateMY(cp.purchased_at)}</TableCell>
+                    <TableCell>{formatDateTimeMY(cp.deleted_at)}</TableCell>
                     <TableCell>
                       {Math.max(
                         0,
@@ -584,7 +579,7 @@ export default function CustomerDetailClient({
               {!loadingHistory && historyLogs.map((log) => (
                 <TableRow key={log.id}>
                   <TableCell className="text-sm text-gray-700">
-                    {new Date(log.used_at).toLocaleString("en-MY")}
+                    {formatDateTimeMY(log.used_at)}
                   </TableCell>
                   <TableCell className="text-sm text-gray-700 whitespace-normal break-all max-w-[280px]">
                     {log.notes?.trim() ? log.notes : "-"}

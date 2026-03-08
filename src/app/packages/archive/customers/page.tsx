@@ -5,6 +5,7 @@ import {
   restoreArchivedCustomer,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
+import { formatDateMY, formatDateTimeMY } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -68,11 +69,9 @@ export default async function ArchivedCustomersPage() {
                 <TableCell className="font-medium whitespace-normal break-words max-w-[200px]">{customer.name}</TableCell>
                 <TableCell>{customer.contact_number}</TableCell>
                 <TableCell>
-                  {customer.birthday
-                    ? new Date(customer.birthday).toLocaleDateString("en-MY")
-                    : "-"}
+                  {customer.birthday ? formatDateMY(customer.birthday) : "-"}
                 </TableCell>
-                <TableCell>{new Date(customer.deleted_at).toLocaleString("en-MY")}</TableCell>
+                <TableCell>{formatDateTimeMY(customer.deleted_at)}</TableCell>
                 <TableCell>
                   <form
                     action={async () => {
