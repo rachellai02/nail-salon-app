@@ -454,8 +454,8 @@ export async function createCustomer(input: {
   contact_number: string;
   birthday?: string;
 }): Promise<Customer> {
-  if (!/^\d+$/.test(input.contact_number)) {
-    throw new Error("Contact number must contain numbers only");
+  if (!/^\+?\d+$/.test(input.contact_number)) {
+    throw new Error("Contact number must contain numbers only (with optional + prefix)");
   }
 
   const customerCode = await generateUniqueCustomerCode();
@@ -481,8 +481,8 @@ export async function updateCustomer(
   id: string,
   input: Partial<Pick<Customer, "name" | "contact_number" | "birthday">>
 ): Promise<void> {
-  if (input.contact_number !== undefined && !/^\d+$/.test(input.contact_number)) {
-    throw new Error("Contact number must contain numbers only");
+  if (input.contact_number !== undefined && !/^\+?\d+$/.test(input.contact_number)) {
+    throw new Error("Contact number must contain numbers only (with optional + prefix)");
   }
 
   const normalizedInput = {
