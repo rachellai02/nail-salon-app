@@ -30,11 +30,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 min-h-screen`}
       >
         <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-6">
-          <span className="font-bold text-lg text-pink-600">Prestige by Chusen</span>
-          <Link href="/packages" className="text-sm text-gray-600 hover:text-pink-600 font-medium">
-            Packages
+          <span className="font-bold text-lg" style={{fontSize: "20px"}}>Prestige <i style={{ fontSize: "14px"}}>by Chusen</i></span>
+          <Link href="/packages" className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium">
+            Package Types
           </Link>
-          <Link href="/packages/customers" className="text-sm text-gray-600 hover:text-pink-600 font-medium">
+          <Link href="/packages/customers" className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium">
             Customer's Packages
           </Link>
         </nav>

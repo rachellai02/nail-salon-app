@@ -2,6 +2,7 @@
 
 export type Package = {
   id: string;
+  package_code: number;
   name: string;
   total_uses: number;
   price: number;

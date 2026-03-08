@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Package } from "@/lib/types";
-import { updatePackage } from "@/lib/actions";
+import { updatePackage, deletePackage } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -47,6 +47,19 @@ export default function PackagesClient({ initialPackages }: Props) {
     }
   }
 
+  async function handleDelete(pkg: Package) {
+    if (!confirm(`Are you sure you want to delete "${pkg.name}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deletePackage(pkg.id);
+      setPackages((prev) => prev.filter((p) => p.id !== pkg.id));
+      toast.success("Package deleted successfully");
+    } catch {
+      toast.error("Failed to delete package");
+    }
+  }
+
   function handleClose() {
     setDialogOpen(false);
     // Refresh by reloading (simple approach; can be improved with router.refresh())
@@ -59,7 +72,7 @@ export default function PackagesClient({ initialPackages }: Props) {
         <div>
           <h1 className="text-2xl font-bold">Package Types</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Manage the packages your salon offers (e.g. Manicure 5x)
+            Manage the packages your salon offers.
           </p>
         </div>
         <Button onClick={openCreate}>+ New Package</Button>
@@ -69,24 +82,26 @@ export default function PackagesClient({ initialPackages }: Props) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Package ID</TableHead>
               <TableHead>Package Name</TableHead>
-              <TableHead>Uses</TableHead>
               <TableHead>Price (RM)</TableHead>
+              <TableHead>Use Count</TableHead>
               <TableHead>Description</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {packages.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-gray-400 py-10">
+                <TableCell colSpan={7} className="text-center text-gray-400 py-10">
                   No packages yet. Click &quot;+ New Package&quot; to create one.
                 </TableCell>
               </TableRow>
             )}
             {packages.map((pkg) => (
               <TableRow key={pkg.id} className={!pkg.is_active ? "opacity-50" : ""}>
+                <TableCell className="text-gray-500 text-sm font-mono">{String(pkg.package_code).padStart(3, "0")}</TableCell>
                 <TableCell className="font-medium">{pkg.name}</TableCell>
                 <TableCell>{pkg.total_uses}x</TableCell>
                 <TableCell>RM {Number(pkg.price).toFixed(2)}</TableCell>
@@ -96,16 +111,24 @@ export default function PackagesClient({ initialPackages }: Props) {
                     {pkg.is_active ? "Active" : "Inactive"}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-right space-x-2">
+                <TableCell className="space-x-2">
                   <Button size="sm" variant="outline" onClick={() => openEdit(pkg)}>
                     Edit
                   </Button>
                   <Button
                     size="sm"
                     variant={pkg.is_active ? "destructive" : "outline"}
+                    className={!pkg.is_active ? "hover:text-gray-600" : undefined}
                     onClick={() => toggleActive(pkg)}
                   >
                     {pkg.is_active ? "Deactivate" : "Activate"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => handleDelete(pkg)}
+                  >
+                    Delete
                   </Button>
                 </TableCell>
               </TableRow>

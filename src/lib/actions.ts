@@ -12,7 +12,7 @@ export async function getPackages(): Promise<Package[]> {
   const { data, error } = await supabase
     .from("packages")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: true });
 
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -34,6 +34,12 @@ export async function updatePackage(
   input: Partial<Pick<Package, "name" | "total_uses" | "price" | "description" | "is_active">>
 ): Promise<void> {
   const { error } = await supabase.from("packages").update(input).eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/packages");
+}
+
+export async function deletePackage(id: string): Promise<void> {
+  const { error } = await supabase.from("packages").delete().eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/packages");
 }
