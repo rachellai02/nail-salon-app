@@ -9,6 +9,7 @@ import {
   ArchivedPackage,
   ArchivedCustomer,
   ArchivedCustomerPackage,
+  Appointment,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -1049,4 +1050,75 @@ export async function getUsageLogs(customerPackageId: string) {
 
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────
+// APPOINTMENTS
+// ─────────────────────────────────────────────────────────────
+
+export async function getAppointmentsForRange(
+  from: string,
+  to: string
+): Promise<Appointment[]> {
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("*")
+    .gte("appointment_date", from)
+    .lte("appointment_date", to)
+    .order("start_time", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function createAppointment(input: {
+  customer_name: string;
+  contact_number: string | null;
+  service: string;
+  appointment_date: string;
+  start_time: string;
+  end_time: string;
+  notes: string | null;
+  num_persons?: number;
+  has_package?: boolean;
+  status?: string;
+}): Promise<void> {
+  const { error } = await supabase.from("appointments").insert([{
+    ...input,
+    status: input.status ?? "confirmed",
+  }]);
+  if (error) throw new Error(error.message);
+  revalidatePath("/appointments");
+}
+
+export async function updateAppointment(
+  id: string,
+  input: Partial<{
+    customer_name: string;
+    contact_number: string | null;
+    service: string;
+    appointment_date: string;
+    start_time: string;
+    end_time: string;
+    notes: string | null;
+    num_persons: number;
+    has_package: boolean;
+    status: string;
+  }>
+): Promise<void> {
+  const { error } = await supabase
+    .from("appointments")
+    .update(input)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/appointments");
+}
+
+export async function deleteAppointment(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("appointments")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/appointments");
 }

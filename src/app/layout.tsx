@@ -37,11 +37,14 @@ export default function RootLayout({
           <Link href="/packages/customers" className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium">
             Customer's Packages
           </Link>
+          <Link href="/appointments" className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium">
+            Appointments
+          </Link>
           <Link href="/packages/archive" className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium">
             Archive
           </Link>
         </nav>
-        <main className="px-6 py-8 max-w-6xl mx-auto">{children}</main>
+        <main className="px-6 py-8">{children}</main>
         <Toaster richColors />
       </body>
     </html>

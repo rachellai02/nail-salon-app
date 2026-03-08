@@ -41,6 +41,21 @@ export type PackageUsageLog = {
   notes: string | null;
 };
 
+export type Appointment = {
+  id: string;
+  customer_name: string;
+  contact_number: string | null;
+  service: string;
+  appointment_date: string;   // "yyyy-MM-dd"
+  start_time: string;          // "HH:MM:SS"
+  end_time: string;            // "HH:MM:SS"
+  notes: string | null;
+  num_persons: number;
+  has_package: boolean;
+  status: "confirmed" | "completed" | "cancelled";
+  created_at: string;
+};
+
 export type ArchivedPackage = {
   id: string;
   original_package_id: string;

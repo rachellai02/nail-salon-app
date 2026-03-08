@@ -119,6 +119,26 @@ CREATE TABLE archived_customer_packages (
 );
 
 -- -------------------------------------------------------
+-- TABLE: appointments
+-- Stores customer appointments on the calendar.
+-- -------------------------------------------------------
+CREATE TABLE appointments (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_name    TEXT NOT NULL,
+  contact_number   TEXT,
+  service          TEXT NOT NULL,
+  appointment_date DATE NOT NULL,
+  start_time       TIME NOT NULL,
+  end_time         TIME NOT NULL,
+  notes            TEXT,
+  num_persons      INTEGER NOT NULL DEFAULT 1,
+  has_package      BOOLEAN NOT NULL DEFAULT FALSE,
+  status           TEXT NOT NULL DEFAULT 'confirmed'
+                     CHECK (status IN ('confirmed', 'completed', 'cancelled')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------------
 -- INDEXES for faster lookups
 -- -------------------------------------------------------
 CREATE INDEX idx_customers_contact ON customers(contact_number);
@@ -127,6 +147,7 @@ CREATE INDEX idx_usage_logs_customer_package ON package_usage_logs(customer_pack
 CREATE INDEX idx_archived_packages_deleted_at ON archived_packages(deleted_at);
 CREATE INDEX idx_archived_customers_deleted_at ON archived_customers(deleted_at);
 CREATE INDEX idx_archived_customer_packages_customer ON archived_customer_packages(customer_id);
+CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 
 -- -------------------------------------------------------
 -- EXISTING DATABASE MIGRATION
