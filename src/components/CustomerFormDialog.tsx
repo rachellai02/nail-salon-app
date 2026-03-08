@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { createCustomer, updateCustomer } from "@/lib/actions";
 import { Customer } from "@/lib/types";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +23,7 @@ const schema = z.object({
   name: z.string().min(1, "Customer name is required"),
   contact_number: z
     .string()
-    .regex(/^\d+$/, "Contact number must contain numbers only")
-    .min(4, "Contact number must have at least 4 digits"),
+    .regex(/^\+\d{4,15}$/, "Please enter a complete phone number"),
   birthday: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
@@ -45,6 +45,7 @@ export function CustomerFormDialog({ open, onClose, onSuccess, editingCustomer }
     handleSubmit,
     reset,
     watch,
+    control,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -154,17 +155,16 @@ export function CustomerFormDialog({ open, onClose, onSuccess, editingCustomer }
             {errors.name && <p className="text-xs text-red-500">{errors.name.message}</p>}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="contact_number">Contact Number</Label>
-            <Input
-              id="contact_number"
-              placeholder="e.g. 0123456789"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              {...register("contact_number")}
-              onInput={(e) => {
-                const target = e.target as HTMLInputElement;
-                target.value = target.value.replace(/\D/g, "");
-              }}
+            <Label>Contact Number</Label>
+            <Controller
+              name="contact_number"
+              control={control}
+              render={({ field }) => (
+                <PhoneInput
+                  value={field.value}
+                  onChange={field.onChange}
+                />
+              )}
             />
             {errors.contact_number && <p className="text-xs text-red-500">{errors.contact_number.message}</p>}
           </div>

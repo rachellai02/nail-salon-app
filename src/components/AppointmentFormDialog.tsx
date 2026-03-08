@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useForm, Resolver } from "react-hook-form";
+import { useForm, Controller, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { CalendarIcon, Trash2 } from "lucide-react";
-import { cn } from "@/lib/utils";import {
+import { cn } from "@/lib/utils";
+import { PhoneInput } from "@/components/ui/phone-input";
+import {
   createAppointment,
   updateAppointment,
   deleteAppointment,
@@ -50,8 +52,7 @@ const schema = z
     customer_name:  z.string().min(1, "Customer name is required"),
     contact_number: z
       .string()
-      .min(1, "Contact number is required")
-      .regex(/^\d+$/, "Contact number must contain digits only"),
+      .regex(/^\+\d{4,15}$/, "Please enter a complete phone number"),
     service:        z.string().min(1, "Service is required"),
     num_persons:    z.coerce.number().int().min(1, "At least 1 person").default(1),
     start_time:     z.string().min(1, "Start time is required"),
@@ -110,6 +111,7 @@ export function AppointmentFormDialog({
     setValue,
     watch,
     reset,
+    control,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
@@ -252,12 +254,16 @@ export function AppointmentFormDialog({
 
           {/* Contact */}
           <div className="space-y-1">
-            <Label htmlFor="contact_number">Contact Number</Label>
-            <Input
-              id="contact_number"
-              inputMode="numeric"
-              placeholder="e.g. 0123456789"
-              {...register("contact_number")}
+            <Label>Contact Number</Label>
+            <Controller
+              name="contact_number"
+              control={control}
+              render={({ field }) => (
+                <PhoneInput
+                  value={field.value}
+                  onChange={field.onChange}
+                />
+              )}
             />
             {errors.contact_number && (
               <p className="text-xs text-red-500">{errors.contact_number.message}</p>
