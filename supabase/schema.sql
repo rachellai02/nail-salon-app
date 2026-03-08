@@ -24,17 +24,30 @@ CREATE TABLE packages (
 );
 
 -- -------------------------------------------------------
+-- TABLE: customers
+-- Stores customer information (registered once)
+-- -------------------------------------------------------
+CREATE TABLE customers (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_code  TEXT NOT NULL UNIQUE,                     -- random 8-digit ID, immutable
+  name           TEXT NOT NULL,
+  contact_number TEXT NOT NULL,
+  birthday       DATE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------------
 -- TABLE: customer_packages
 -- Records each time a customer buys a package.
 -- This is what gets shared via the package ID.
 -- -------------------------------------------------------
 CREATE TABLE customer_packages (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),  -- This IS the shareable Package ID
+  customer_id      UUID NOT NULL REFERENCES customers(id),
   package_id       UUID NOT NULL REFERENCES packages(id),
-  customer_name    TEXT NOT NULL,
-  contact_number   TEXT NOT NULL,
   remaining_uses   INTEGER NOT NULL,                             -- starts equal to packages.total_uses
   purchased_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expiry_date      DATE,                                          -- package expiry date
   notes            TEXT                                          -- any extra notes
 );
 
@@ -51,16 +64,76 @@ CREATE TABLE package_usage_logs (
 );
 
 -- -------------------------------------------------------
--- INDEXES for faster lookups
+-- TABLE: archived_packages
+-- Stores deleted package types for audit/history
 -- -------------------------------------------------------
-CREATE INDEX idx_customer_packages_contact ON customer_packages(contact_number);
-CREATE INDEX idx_usage_logs_customer_package ON package_usage_logs(customer_package_id);
+CREATE TABLE archived_packages (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  original_package_id UUID NOT NULL,
+  package_code        INTEGER,
+  name                TEXT NOT NULL,
+  total_uses          INTEGER NOT NULL,
+  price               NUMERIC(10, 2) NOT NULL,
+  description         TEXT,
+  was_active          BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at          TIMESTAMPTZ,
+  deleted_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- -------------------------------------------------------
--- EXISTING DATABASE MIGRATION (packages table already exists)
+-- TABLE: archived_customers
+-- Stores deleted customers for audit/history
+-- -------------------------------------------------------
+CREATE TABLE archived_customers (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  original_customer_id UUID NOT NULL,
+  customer_code        TEXT,
+  name                 TEXT NOT NULL,
+  contact_number       TEXT NOT NULL,
+  birthday             DATE,
+  created_at           TIMESTAMPTZ,
+  deleted_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------------
+-- TABLE: archived_customer_packages
+-- Stores deleted purchased packages for audit/history
+-- -------------------------------------------------------
+CREATE TABLE archived_customer_packages (
+  id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  original_customer_package_id UUID NOT NULL,
+  customer_id                  UUID,
+  customer_code                TEXT,
+  customer_name                TEXT NOT NULL,
+  contact_number               TEXT NOT NULL,
+  package_id                   UUID,
+  package_code                 INTEGER,
+  package_name                 TEXT NOT NULL,
+  total_uses                   INTEGER NOT NULL,
+  remaining_uses               INTEGER NOT NULL,
+  purchased_at                 TIMESTAMPTZ,
+  expiry_date                  DATE,
+  notes                        TEXT,
+  usage_logs                   JSONB NOT NULL DEFAULT '[]'::jsonb,
+  deleted_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------------
+-- INDEXES for faster lookups
+-- -------------------------------------------------------
+CREATE INDEX idx_customers_contact ON customers(contact_number);
+CREATE INDEX idx_customer_packages_customer ON customer_packages(customer_id);
+CREATE INDEX idx_usage_logs_customer_package ON package_usage_logs(customer_package_id);
+CREATE INDEX idx_archived_packages_deleted_at ON archived_packages(deleted_at);
+CREATE INDEX idx_archived_customers_deleted_at ON archived_customers(deleted_at);
+CREATE INDEX idx_archived_customer_packages_customer ON archived_customer_packages(customer_id);
+
+-- -------------------------------------------------------
+-- EXISTING DATABASE MIGRATION
 -- Copy this block into SQL Editor and run it.
 -- Do not run the full file on existing databases.
 -- -------------------------------------------------------
+-- -- Step 1: Add package_code to packages (if not done already)
 -- ALTER TABLE packages
 -- ADD COLUMN IF NOT EXISTS package_code INTEGER;
 --
@@ -91,3 +164,123 @@ CREATE INDEX idx_usage_logs_customer_package ON package_usage_logs(customer_pack
 --
 -- CREATE UNIQUE INDEX IF NOT EXISTS packages_package_code_unique_idx
 -- ON packages(package_code);
+--
+-- -- Step 2: Create customers table
+-- CREATE TABLE IF NOT EXISTS customers (
+--   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   customer_code  TEXT NOT NULL UNIQUE,
+--   name           TEXT NOT NULL,
+--   contact_number TEXT NOT NULL,
+--   birthday       DATE,
+--   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+--
+-- CREATE INDEX IF NOT EXISTS idx_customers_contact ON customers(contact_number);
+--
+-- -- Step 2b: Add customer_code for existing customers
+-- ALTER TABLE customers
+-- ADD COLUMN IF NOT EXISTS customer_code TEXT;
+--
+-- UPDATE customers
+-- SET customer_code = LPAD(FLOOR(RANDOM() * 90000000 + 10000000)::TEXT, 8, '0')
+-- WHERE customer_code IS NULL;
+--
+-- ALTER TABLE customers
+-- ALTER COLUMN customer_code SET NOT NULL;
+--
+-- CREATE UNIQUE INDEX IF NOT EXISTS customers_customer_code_unique_idx
+-- ON customers(customer_code);
+--
+-- -- Step 3: Migrate existing customer data from customer_packages to customers
+-- INSERT INTO customers (name, contact_number, birthday, created_at)
+-- SELECT DISTINCT ON (customer_name, contact_number)
+--   customer_name,
+--   contact_number,
+--   birthday,
+--   MIN(purchased_at) OVER (PARTITION BY customer_name, contact_number)
+-- FROM customer_packages
+-- WHERE customer_name IS NOT NULL
+-- ON CONFLICT DO NOTHING;
+--
+-- -- Step 4: Add customer_id column to customer_packages
+-- ALTER TABLE customer_packages
+-- ADD COLUMN IF NOT EXISTS customer_id UUID;
+--
+-- -- Step 5: Link existing customer_packages to customers
+-- UPDATE customer_packages cp
+-- SET customer_id = c.id
+-- FROM customers c
+-- WHERE cp.customer_name = c.name
+--   AND cp.contact_number = c.contact_number
+--   AND cp.customer_id IS NULL;
+--
+-- -- Step 6: Make customer_id NOT NULL and add foreign key
+-- ALTER TABLE customer_packages
+-- ALTER COLUMN customer_id SET NOT NULL;
+--
+-- ALTER TABLE customer_packages
+-- ADD CONSTRAINT fk_customer_packages_customer
+-- FOREIGN KEY (customer_id) REFERENCES customers(id);
+--
+-- CREATE INDEX IF NOT EXISTS idx_customer_packages_customer ON customer_packages(customer_id);
+--
+-- -- Step 7: Remove old customer fields from customer_packages
+-- ALTER TABLE customer_packages
+-- DROP COLUMN IF EXISTS customer_name,
+-- DROP COLUMN IF EXISTS contact_number,
+-- DROP COLUMN IF EXISTS birthday;
+--
+-- -- Step 8: Add expiry_date if not exists
+-- ALTER TABLE customer_packages
+-- ADD COLUMN IF NOT EXISTS expiry_date DATE;
+--
+-- -- Step 9: Create archive tables (if not exists)
+-- CREATE TABLE IF NOT EXISTS archived_packages (
+--   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   original_package_id UUID NOT NULL,
+--   package_code        INTEGER,
+--   name                TEXT NOT NULL,
+--   total_uses          INTEGER NOT NULL,
+--   price               NUMERIC(10, 2) NOT NULL,
+--   description         TEXT,
+--   was_active          BOOLEAN NOT NULL DEFAULT TRUE,
+--   created_at          TIMESTAMPTZ,
+--   deleted_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS archived_customers (
+--   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   original_customer_id UUID NOT NULL,
+--   customer_code        TEXT,
+--   name                 TEXT NOT NULL,
+--   contact_number       TEXT NOT NULL,
+--   birthday             DATE,
+--   created_at           TIMESTAMPTZ,
+--   deleted_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS archived_customer_packages (
+--   id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   original_customer_package_id UUID NOT NULL,
+--   customer_id                  UUID,
+--   customer_code                TEXT,
+--   customer_name                TEXT NOT NULL,
+--   contact_number               TEXT NOT NULL,
+--   package_id                   UUID,
+--   package_code                 INTEGER,
+--   package_name                 TEXT NOT NULL,
+--   total_uses                   INTEGER NOT NULL,
+--   remaining_uses               INTEGER NOT NULL,
+--   purchased_at                 TIMESTAMPTZ,
+--   expiry_date                  DATE,
+--   notes                        TEXT,
+--   usage_logs                   JSONB NOT NULL DEFAULT '[]'::jsonb,
+--   deleted_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+--
+-- ALTER TABLE archived_customer_packages
+-- ADD COLUMN IF NOT EXISTS usage_logs JSONB NOT NULL DEFAULT '[]'::jsonb;
+--
+-- CREATE INDEX IF NOT EXISTS idx_archived_packages_deleted_at ON archived_packages(deleted_at);
+-- CREATE INDEX IF NOT EXISTS idx_archived_customers_deleted_at ON archived_customers(deleted_at);
+-- CREATE INDEX IF NOT EXISTS idx_archived_customer_packages_customer ON archived_customer_packages(customer_id);

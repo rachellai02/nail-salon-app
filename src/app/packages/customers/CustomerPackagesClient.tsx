@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CustomerPackage, Package } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import { CustomerPackage, Package, Customer } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -13,57 +13,73 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { SellPackageDialog } from "@/components/SellPackageDialog";
-import { DeductUseDialog } from "@/components/DeductUseDialog";
+import { CustomerFormDialog } from "@/components/CustomerFormDialog";
 
 type Props = {
   initialCustomerPackages: CustomerPackage[];
   packages: Package[];
+  customers: Customer[];
+};
+
+type CustomerWithPackages = {
+  customer: Customer;
+  packages: CustomerPackage[];
 };
 
 export default function CustomerPackagesClient({
   initialCustomerPackages,
   packages,
+  customers,
 }: Props) {
   const [search, setSearch] = useState("");
-  const [sellOpen, setSellOpen] = useState(false);
-  const [deductTarget, setDeductTarget] = useState<CustomerPackage | null>(null);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const router = useRouter();
 
-  const filtered = initialCustomerPackages.filter((cp) => {
+  // Group packages by customer
+  const customerWithPackages: CustomerWithPackages[] = customers.map((customer) => ({
+    customer,
+    packages: initialCustomerPackages.filter((cp) => cp.customer_id === customer.id),
+  }));
+
+  const filtered = customerWithPackages.filter(({ customer, packages }) => {
     const term = search.toLowerCase();
     return (
-      cp.customer_name.toLowerCase().includes(term) ||
-      cp.contact_number.includes(term) ||
-      cp.id.toLowerCase().includes(term)
+      customer.name.toLowerCase().includes(term) ||
+      customer.customer_code.toLowerCase().includes(term) ||
+      customer.contact_number.includes(term) ||
+      packages.some((pkg) => pkg.id.toLowerCase().includes(term))
     );
   });
 
-  function handleClose() {
-    setSellOpen(false);
+  function handleRegisterClose() {
+    setRegisterOpen(false);
     window.location.reload();
   }
 
-  function handleDeductClose() {
-    setDeductTarget(null);
-    window.location.reload();
+  function navigateToCustomer(customerId: string) {
+    router.push(`/packages/customers/${customerId}`);
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Customer Packages</h1>
+          <h1 className="text-2xl font-bold">Customers</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Record a new package sale, look up customers, and deduct sessions.
+            Manage customers and their package purchases.
           </p>
         </div>
-        <Button onClick={() => setSellOpen(true)}>+ Sell Package</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setRegisterOpen(true)}>
+            + Register Customer
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
       <div className="mb-4">
         <Input
-          placeholder="Search by name, contact number, or package ID..."
+          placeholder="Search by customer ID, name, or contact number"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-md"
@@ -74,65 +90,52 @@ export default function CustomerPackagesClient({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Customer Name</TableHead>
+              <TableHead>Customer ID</TableHead>
+              <TableHead className="whitespace-normal break-words max-w-[200px]">Customer Name</TableHead>
               <TableHead>Contact</TableHead>
-              <TableHead>Package</TableHead>
-              <TableHead>Remaining</TableHead>
-              <TableHead>Package ID</TableHead>
-              <TableHead>Purchased</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead>Birthday</TableHead>
+              <TableHead>Total Packages</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-gray-400 py-10">
-                  {search ? "No results found." : "No customer packages yet."}
+                <TableCell colSpan={6} className="text-center text-gray-400 py-10">
+                  {search ? "No results found." : "No customers yet."}
                 </TableCell>
               </TableRow>
             )}
-            {filtered.map((cp) => (
-              <TableRow key={cp.id}>
-                <TableCell className="font-medium">{cp.customer_name}</TableCell>
-                <TableCell>{cp.contact_number}</TableCell>
-                <TableCell>{cp.package?.name ?? "—"}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant={
-                      cp.remaining_uses === 0
-                        ? "destructive"
-                        : cp.remaining_uses <= 1
-                        ? "secondary"
-                        : "default"
-                    }
-                  >
-                    {cp.remaining_uses} left
-                  </Badge>
-                </TableCell>
+            {filtered.map(({ customer, packages: customerPkgs }) => (
+              <TableRow key={customer.id} className="cursor-pointer hover:bg-gray-50">
                 <TableCell>
                   <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                    {cp.id.slice(0, 8).toUpperCase()}
+                    {customer.customer_code}
                   </code>
-                  <span className="text-gray-400 text-xs ml-1">(click to copy)</span>
-                  <button
-                    className="ml-1 text-xs text-blue-500 hover:underline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(cp.id);
-                    }}
-                  >
-                    Copy full ID
-                  </button>
                 </TableCell>
+                <TableCell 
+                  className="font-medium text-blue-600 hover:underline whitespace-normal break-words max-w-[200px]"
+                  onClick={() => navigateToCustomer(customer.id)}
+                >
+                  {customer.name}
+                </TableCell>
+                <TableCell>{customer.contact_number}</TableCell>
                 <TableCell className="text-gray-500 text-sm">
-                  {new Date(cp.purchased_at).toLocaleDateString("en-MY")}
+                  {customer.birthday
+                    ? new Date(customer.birthday).toLocaleDateString("en-MY")
+                    : "—"}
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell>{customerPkgs.filter((pkg) => pkg.remaining_uses > 0).length}</TableCell>
+                <TableCell>
                   <Button
                     size="sm"
-                    disabled={cp.remaining_uses <= 0}
-                    onClick={() => setDeductTarget(cp)}
+                    variant="outline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigateToCustomer(customer.id);
+                    }}
                   >
-                    Use 1 Session
+                    View Details
                   </Button>
                 </TableCell>
               </TableRow>
@@ -141,15 +144,9 @@ export default function CustomerPackagesClient({
         </Table>
       </div>
 
-      <SellPackageDialog
-        open={sellOpen}
-        onClose={handleClose}
-        packages={packages}
-      />
-      <DeductUseDialog
-        open={!!deductTarget}
-        onClose={handleDeductClose}
-        customerPackage={deductTarget}
+      <CustomerFormDialog
+        open={registerOpen}
+        onClose={handleRegisterClose}
       />
     </div>
   );

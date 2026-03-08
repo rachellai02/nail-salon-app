@@ -83,10 +83,10 @@ export default function PackagesClient({ initialPackages }: Props) {
           <TableHeader>
             <TableRow>
               <TableHead>Package ID</TableHead>
-              <TableHead>Package Name</TableHead>
-              <TableHead>Price (RM)</TableHead>
+              <TableHead className="whitespace-normal break-words max-w-[200px]">Package Name</TableHead>
               <TableHead>Use Count</TableHead>
-              <TableHead>Description</TableHead>
+              <TableHead>Price (RM)</TableHead>
+              <TableHead className="whitespace-normal break-words max-w-[250px]">Description</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -102,10 +102,10 @@ export default function PackagesClient({ initialPackages }: Props) {
             {packages.map((pkg) => (
               <TableRow key={pkg.id} className={!pkg.is_active ? "opacity-50" : ""}>
                 <TableCell className="text-gray-500 text-sm font-mono">{String(pkg.package_code).padStart(3, "0")}</TableCell>
-                <TableCell className="font-medium">{pkg.name}</TableCell>
+                <TableCell className="font-medium whitespace-normal break-words max-w-[200px]">{pkg.name}</TableCell>
                 <TableCell>{pkg.total_uses}x</TableCell>
                 <TableCell>RM {Number(pkg.price).toFixed(2)}</TableCell>
-                <TableCell className="text-gray-500 text-sm">{pkg.description ?? "—"}</TableCell>
+                <TableCell className="text-gray-500 text-sm whitespace-normal break-words max-w-[250px]">{pkg.description ?? "—"}</TableCell>
                 <TableCell>
                   <Badge variant={pkg.is_active ? "default" : "secondary"}>
                     {pkg.is_active ? "Active" : "Inactive"}
@@ -118,7 +118,6 @@ export default function PackagesClient({ initialPackages }: Props) {
                   <Button
                     size="sm"
                     variant={pkg.is_active ? "destructive" : "outline"}
-                    className={!pkg.is_active ? "hover:text-gray-600" : undefined}
                     onClick={() => toggleActive(pkg)}
                   >
                     {pkg.is_active ? "Deactivate" : "Activate"}
