@@ -139,9 +139,27 @@ type DialogState =
 
 // ─── Current time indicator ───────────────────────────────────
 function CurrentTimeIndicator() {
-  const now = new Date();
-  const top = minutesToTop(now.getHours() * 60 + now.getMinutes());
+  const [mounted, setMounted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    // Only render on client-side to avoid UTC/timezone mismatch
+    setMounted(true);
+    setCurrentTime(new Date());
+    
+    // Update every minute
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!mounted) return null;
+
+  const top = minutesToTop(currentTime.getHours() * 60 + currentTime.getMinutes());
   if (top < 0 || top > SLOT_HEIGHT * TIME_SLOTS.length) return null;
+  
   return (
     <div
       className="absolute left-0 right-0 z-20 pointer-events-none"
