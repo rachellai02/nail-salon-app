@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { getArchivedPackages, restoreArchivedPackage } from "@/lib/actions";
+import {
+  getArchivedPackages,
+  permanentlyDeleteAllArchivedPackages,
+  restoreArchivedPackage,
+} from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -17,9 +21,26 @@ export default async function ArchivedPackageTypesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Archived Package Types</h1>
-        <Link href="/packages/archive" className="text-sm text-blue-600 hover:underline">
-          Back to Archive
-        </Link>
+        <div className="flex items-center gap-2">
+          <form
+            action={async () => {
+              "use server";
+              await permanentlyDeleteAllArchivedPackages();
+            }}
+          >
+            <Button
+              size="sm"
+              variant="destructive"
+              type="submit"
+              disabled={archivedPackages.length === 0}
+            >
+              Permanently Delete All
+            </Button>
+          </form>
+          <Link href="/packages/archive" className="text-sm text-blue-600 hover:underline">
+            Back to Archive
+          </Link>
+        </div>
       </div>
       <div className="bg-white rounded-lg border">
         <Table>

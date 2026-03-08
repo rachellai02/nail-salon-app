@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { restoreArchivedCustomer, restoreArchivedPackage } from "@/lib/actions";
+import {
+  permanentlyDeleteAllArchivedCustomers,
+  permanentlyDeleteAllArchivedPackages,
+  restoreArchivedCustomer,
+  restoreArchivedPackage,
+} from "@/lib/actions";
 import type { ArchivedCustomer, ArchivedPackage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +45,32 @@ export default function ArchiveSwitcher({ archivedPackages, archivedCustomers }:
         >
           Archived Customers
         </Button>
+      </div>
+
+      <div>
+        {activeSection === "package-types" ? (
+          <form action={permanentlyDeleteAllArchivedPackages}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="destructive"
+              disabled={archivedPackages.length === 0}
+            >
+              Permanently Delete All
+            </Button>
+          </form>
+        ) : (
+          <form action={permanentlyDeleteAllArchivedCustomers}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="destructive"
+              disabled={archivedCustomers.length === 0}
+            >
+              Permanently Delete All
+            </Button>
+          </form>
+        )}
       </div>
 
       {activeSection === "package-types" ? (

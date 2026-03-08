@@ -379,6 +379,49 @@ export async function restoreArchivedPackage(archivedPackageId: string): Promise
   revalidatePath("/packages/archive/package-types");
 }
 
+export async function permanentlyDeleteAllArchivedPackages(): Promise<void> {
+  await purgeExpiredArchiveRecords();
+
+  const { data: archivedPackages, error: archivedPackagesError } = await supabase
+    .from("archived_packages")
+    .select("original_package_id");
+
+  if (archivedPackagesError) {
+    if (isMissingArchiveTableError(archivedPackagesError)) return;
+    throw new Error(archivedPackagesError.message);
+  }
+
+  const originalPackageIds = (archivedPackages ?? [])
+    .map((pkg) => pkg.original_package_id)
+    .filter(Boolean);
+
+  if (originalPackageIds.length > 0) {
+    const { error: deleteArchivedCustomerPackagesError } = await supabase
+      .from("archived_customer_packages")
+      .delete()
+      .in("package_id", originalPackageIds);
+
+    if (
+      deleteArchivedCustomerPackagesError &&
+      !isMissingArchiveTableError(deleteArchivedCustomerPackagesError)
+    ) {
+      throw new Error(deleteArchivedCustomerPackagesError.message);
+    }
+  }
+
+  const { error: deleteArchivedPackagesError } = await supabase
+    .from("archived_packages")
+    .delete()
+    .not("id", "is", null);
+
+  if (deleteArchivedPackagesError && !isMissingArchiveTableError(deleteArchivedPackagesError)) {
+    throw new Error(deleteArchivedPackagesError.message);
+  }
+
+  revalidatePath("/packages/archive");
+  revalidatePath("/packages/archive/package-types");
+}
+
 // ─────────────────────────────────────────────────────────────
 // CUSTOMERS
 // ─────────────────────────────────────────────────────────────
@@ -709,6 +752,49 @@ export async function restoreArchivedCustomer(archivedCustomerId: string): Promi
   revalidatePath("/packages/archive");
   revalidatePath("/packages/archive/customers");
   revalidatePath(`/packages/customers/${archivedCustomer.original_customer_id}`);
+}
+
+export async function permanentlyDeleteAllArchivedCustomers(): Promise<void> {
+  await purgeExpiredArchiveRecords();
+
+  const { data: archivedCustomers, error: archivedCustomersError } = await supabase
+    .from("archived_customers")
+    .select("original_customer_id");
+
+  if (archivedCustomersError) {
+    if (isMissingArchiveTableError(archivedCustomersError)) return;
+    throw new Error(archivedCustomersError.message);
+  }
+
+  const originalCustomerIds = (archivedCustomers ?? [])
+    .map((customer) => customer.original_customer_id)
+    .filter(Boolean);
+
+  if (originalCustomerIds.length > 0) {
+    const { error: deleteArchivedCustomerPackagesError } = await supabase
+      .from("archived_customer_packages")
+      .delete()
+      .in("customer_id", originalCustomerIds);
+
+    if (
+      deleteArchivedCustomerPackagesError &&
+      !isMissingArchiveTableError(deleteArchivedCustomerPackagesError)
+    ) {
+      throw new Error(deleteArchivedCustomerPackagesError.message);
+    }
+  }
+
+  const { error: deleteArchivedCustomersError } = await supabase
+    .from("archived_customers")
+    .delete()
+    .not("id", "is", null);
+
+  if (deleteArchivedCustomersError && !isMissingArchiveTableError(deleteArchivedCustomersError)) {
+    throw new Error(deleteArchivedCustomersError.message);
+  }
+
+  revalidatePath("/packages/archive");
+  revalidatePath("/packages/archive/customers");
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { getArchivedCustomers, restoreArchivedCustomer } from "@/lib/actions";
+import {
+  getArchivedCustomers,
+  permanentlyDeleteAllArchivedCustomers,
+  restoreArchivedCustomer,
+} from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -17,9 +21,26 @@ export default async function ArchivedCustomersPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Archived Customers</h1>
-        <Link href="/packages/archive" className="text-sm text-blue-600 hover:underline">
-          Back to Archive
-        </Link>
+        <div className="flex items-center gap-2">
+          <form
+            action={async () => {
+              "use server";
+              await permanentlyDeleteAllArchivedCustomers();
+            }}
+          >
+            <Button
+              size="sm"
+              variant="destructive"
+              type="submit"
+              disabled={archivedCustomers.length === 0}
+            >
+              Permanently Delete All
+            </Button>
+          </form>
+          <Link href="/packages/archive" className="text-sm text-blue-600 hover:underline">
+            Back to Archive
+          </Link>
+        </div>
       </div>
       <div className="bg-white rounded-lg border">
         <Table>
