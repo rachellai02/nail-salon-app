@@ -38,7 +38,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-gray-50 flex items-center justify-center py-8">
+    <div className="fixed inset-0 bg-gray-50 overflow-auto">
+      <div className="flex min-h-full items-center justify-center py-8 px-4">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 w-full max-w-sm p-6">
         <div className="mb-5 text-center">
           <h1 className="text-3xl font-bold ">Prestige Nail Parlour</h1>
@@ -102,6 +103,7 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+      </div>
       </div>
     </div>
   );
