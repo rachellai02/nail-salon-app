@@ -34,3 +34,35 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Supabase Keepalive (Auto-Prevent Pause)
+
+This app includes a keepalive endpoint and daily cron to keep your Supabase project active.
+
+- Endpoint: `/api/keepalive`
+- Scheduler: `vercel.json` runs it daily at `03:00 UTC`
+
+### Required environment variables
+
+Set these in your deployment environment (for example, Vercel Project Settings -> Environment Variables):
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CRON_SECRET`
+
+Optional:
+
+- `SUPABASE_KEEPALIVE_TABLE` (defaults to `customers`)
+- `KEEPALIVE_TOKEN` (for manual/external pings using `?token=...`)
+
+### How authorization works
+
+- Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`.
+- The keepalive route validates this before querying the database.
+
+### Verify it works
+
+1. Deploy the app with the environment variables above.
+2. Open `/api/keepalive?token=<KEEPALIVE_TOKEN>` if you set `KEEPALIVE_TOKEN`.
+3. Confirm response contains `{ "ok": true }`.
+4. Check Vercel Function logs for daily cron hits.
