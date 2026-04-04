@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Transaction } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,7 @@ import { ReceiptView } from "@/components/ReceiptView";
 import { voidTransaction, deleteTransaction } from "@/lib/actions";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Receipt, Trash2 } from "lucide-react";
+import SalesSummaryClient from "./SalesSummaryClient";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -26,6 +27,7 @@ type Props = {
   transactions: Transaction[];
   year: number;
   month: number; // 1-based
+  summaryTransactions: { transacted_at: string; total: number }[];
 };
 
 function formatDate(iso: string) {
@@ -40,9 +42,12 @@ function formatDate(iso: string) {
   });
 }
 
-export default function SalesClient({ transactions, year, month }: Props) {
+export default function SalesClient({ transactions, year, month, summaryTransactions }: Props) {
   const router = useRouter();
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const activeTab = searchParams.get("tab") === "details" ? "details" : "summary";
+  const initialDate = searchParams.get("date");
+  const [selectedDate, setSelectedDate] = useState<string | null>(initialDate);
   const [receiptTx, setReceiptTx] = useState<Transaction | null>(null);
   const [voidTarget, setVoidTarget] = useState<Transaction | null>(null);
   const [voiding, setVoiding] = useState(false);
@@ -92,8 +97,38 @@ export default function SalesClient({ transactions, year, month }: Props) {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Month navigation */}
-      <div className="flex items-center justify-between">
+      {/* Tab switcher */}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant={activeTab === "summary" ? "default" : "outline"}
+          onClick={() => router.push(`/sales?year=${year}&month=${month}&tab=summary`)}
+        >
+          Summary
+        </Button>
+        <Button
+          type="button"
+          variant={activeTab === "details" ? "default" : "outline"}
+          onClick={() => router.push(`/sales?year=${year}&month=${month}&tab=details`)}
+        >
+          Details
+        </Button>
+      </div>
+
+      {activeTab === "summary" ? (
+        <SalesSummaryClient
+          transactions={summaryTransactions}
+          onMonthClick={(y, m) => {
+            router.push(`/sales?year=${y}&month=${m}&tab=details`);
+          }}
+          onDayClick={(y, m, d) => {
+            router.push(`/sales?year=${y}&month=${m}&tab=details&date=${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+          }}
+        />
+      ) : (
+        <>
+          {/* Month navigation */}
+          <div className="flex items-center justify-between">
         <button
           type="button"
           onClick={() => navigate(-1)}
@@ -415,6 +450,8 @@ export default function SalesClient({ transactions, year, month }: Props) {
           )}
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   );
 }

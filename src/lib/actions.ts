@@ -1703,6 +1703,16 @@ export async function deleteTransaction(id: string): Promise<void> {
   revalidatePath("/sales");
 }
 
+export async function getAllTransactionSummaries(): Promise<{ transacted_at: string; total: number }[]> {
+  const { data, error } = await supabase
+    .from("sales_transactions")
+    .select("transacted_at, total")
+    .eq("is_voided", false)
+    .order("transacted_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as { transacted_at: string; total: number }[];
+}
+
 export async function getArchivedTransactions(): Promise<ArchivedTransaction[]> {
   const { data, error } = await supabase
     .from("archived_transactions")
