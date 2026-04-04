@@ -12,6 +12,8 @@ import {
   Appointment,
   PackageItem,
   CustomerPackageItem,
+  ServiceCategory,
+  Service,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -1470,4 +1472,119 @@ export async function deleteAppointment(id: string): Promise<void> {
     .eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/appointments");
+}
+
+// -------------------------------------------------------
+// SERVICE CATEGORIES & SERVICES
+// -------------------------------------------------------
+
+export async function getServiceCategories(): Promise<ServiceCategory[]> {
+  const { data: categories, error: catError } = await supabase
+    .from("service_categories")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (catError) throw new Error(catError.message);
+
+  const { data: services, error: svcError } = await supabase
+    .from("services")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (svcError) throw new Error(svcError.message);
+
+  return (categories ?? []).map((cat) => ({
+    ...cat,
+    services: (services ?? []).filter((s: Service) => s.category_id === cat.id),
+  }));
+}
+
+export async function createServiceCategory(name: string): Promise<ServiceCategory> {
+  const { data, error } = await supabase
+    .from("service_categories")
+    .insert([{ name: name.trim() }])
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/services");
+  return data;
+}
+
+export async function updateServiceCategory(id: string, name: string): Promise<void> {
+  const { error } = await supabase
+    .from("service_categories")
+    .update({ name: name.trim() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/services");
+}
+
+export async function deleteServiceCategory(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("service_categories")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/services");
+}
+
+export async function createService(input: {
+  category_id: string;
+  name: string;
+  price: number | null;
+}): Promise<Service> {
+  const { data, error } = await supabase
+    .from("services")
+    .insert([{ category_id: input.category_id, name: input.name.trim(), price: input.price }])
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/services");
+  return data;
+}
+
+export async function updateService(id: string, input: {
+  name?: string;
+  price?: number | null;
+}): Promise<void> {
+  const payload: Record<string, unknown> = {};
+  if (input.name !== undefined) payload.name = input.name.trim();
+  if (input.price !== undefined) payload.price = input.price;
+  const { error } = await supabase
+    .from("services")
+    .update(payload)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/services");
+}
+
+export async function deleteService(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("services")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/services");
+}
+
+export async function reorderServiceCategories(orderedIds: string[]): Promise<void> {
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("service_categories")
+      .update({ sort_order: i })
+      .eq("id", orderedIds[i]);
+    if (error) throw new Error(error.message);
+  }
+  revalidatePath("/services");
+}
+
+export async function reorderServices(orderedIds: string[]): Promise<void> {
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("services")
+      .update({ sort_order: i })
+      .eq("id", orderedIds[i]);
+    if (error) throw new Error(error.message);
+  }
+  revalidatePath("/services");
 }

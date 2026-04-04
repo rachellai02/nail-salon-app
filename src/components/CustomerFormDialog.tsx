@@ -32,10 +32,11 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  onCreated?: (customer: Customer) => void;
   editingCustomer?: Customer | null;
 };
 
-export function CustomerFormDialog({ open, onClose, onSuccess, editingCustomer }: Props) {
+export function CustomerFormDialog({ open, onClose, onSuccess, onCreated, editingCustomer }: Props) {
   const [loading, setLoading] = useState(false);
   const isEditing = !!editingCustomer;
   const nameTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -108,11 +109,12 @@ export function CustomerFormDialog({ open, onClose, onSuccess, editingCustomer }
         });
         toast.success("Customer updated successfully!");
       } else {
-        await createCustomer({
+        const newCustomer = await createCustomer({
           ...data,
           birthday: data.birthday?.trim() ? data.birthday : undefined,
         });
         toast.success("Customer registered successfully!");
+        onCreated?.(newCustomer);
       }
       reset();
       onSuccess?.();

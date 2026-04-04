@@ -37,6 +37,18 @@ export default function NavBar() {
       >
         Archive
       </Link>
+      <Link
+        href="/services"
+        className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
+      >
+        Services
+      </Link>
+      <Link
+        href="/payment"
+        className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
+      >
+        Payment
+      </Link>
       <div className="ml-auto">
         <LogoutButton />
       </div>

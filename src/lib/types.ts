@@ -139,3 +139,20 @@ export type ArchivedCustomerPackage = {
   }>;
   deleted_at: string;
 };
+
+export type ServiceCategory = {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  services?: Service[];
+};
+
+export type Service = {
+  id: string;
+  category_id: string;
+  name: string;
+  price: number | null;
+  sort_order: number;
+  created_at: string;
+};

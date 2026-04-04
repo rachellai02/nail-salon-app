@@ -375,3 +375,25 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 -- -------------------------------------------------------
 -- ALTER TABLE package_usage_logs
 --   ADD COLUMN IF NOT EXISTS cash_topup NUMERIC(10,2);
+
+-- -------------------------------------------------------
+-- MIGRATION: Service categories and services
+-- Copy this block into Supabase SQL Editor and run it.
+-- -------------------------------------------------------
+-- CREATE TABLE IF NOT EXISTS service_categories (
+--   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   name       TEXT NOT NULL,
+--   sort_order INTEGER NOT NULL DEFAULT 0,
+--   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS services (
+--   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   category_id UUID NOT NULL REFERENCES service_categories(id) ON DELETE CASCADE,
+--   name        TEXT NOT NULL,
+--   price       NUMERIC(10,2),
+--   sort_order  INTEGER NOT NULL DEFAULT 0,
+--   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+--
+-- CREATE INDEX IF NOT EXISTS idx_services_category ON services(category_id);
