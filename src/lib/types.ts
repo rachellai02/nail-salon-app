@@ -21,7 +21,9 @@ export type Package = {
   id: string;
   package_code: number;
   name: string;
+  package_type: 'services' | 'credit';
   total_uses: number;
+  total_credits: number | null;
   price: number;
   description: string | null;
   is_active: boolean;
@@ -43,6 +45,7 @@ export type CustomerPackage = {
   customer_id: string;
   package_id: string;
   remaining_uses: number;
+  remaining_credits: number | null;
   purchased_at: string;
   expiry_date: string | null;
   completed_at?: string | null;
@@ -58,6 +61,8 @@ export type PackageUsageLog = {
   customer_package_id: string;
   customer_package_item_id: string | null;
   service_name: string | null;
+  credits_used: number | null;
+  cash_topup: number | null;
   used_at: string;
   notes: string | null;
 };
@@ -82,7 +87,9 @@ export type ArchivedPackage = {
   original_package_id: string;
   package_code: number | null;
   name: string;
+  package_type: 'services' | 'credit';
   total_uses: number;
+  total_credits: number | null;
   price: number;
   description: string | null;
   was_active: boolean;
@@ -112,8 +119,11 @@ export type ArchivedCustomerPackage = {
   package_id: string | null;
   package_code: number | null;
   package_name: string;
+  package_type: 'services' | 'credit';
   total_uses: number;
+  total_credits: number | null;
   remaining_uses: number;
+  remaining_credits: number | null;
   purchased_at: string;
   expiry_date: string | null;
   notes: string | null;

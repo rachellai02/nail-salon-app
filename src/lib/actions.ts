@@ -101,33 +101,43 @@ export async function createPackage(input: {
   name: string;
   price: number;
   description?: string;
-  items: { service_name: string; total_uses: number }[];
+  package_type: 'services' | 'credit';
+  items?: { service_name: string; total_uses: number }[];
+  total_credits?: number;
 }): Promise<void> {
-  if (input.items.length === 0) throw new Error("At least one service item is required");
-  const total_uses = input.items.reduce((sum, item) => sum + item.total_uses, 0);
+  if (input.package_type === 'services') {
+    if (!input.items || input.items.length === 0) throw new Error("At least one service item is required");
+    const total_uses = input.items.reduce((sum, item) => sum + item.total_uses, 0);
 
-  const { data: pkg, error } = await supabase
-    .from("packages")
-    .insert([{ name: input.name, price: input.price, description: input.description, total_uses }])
-    .select()
-    .single();
-  if (error) throw new Error(error.message);
+    const { data: pkg, error } = await supabase
+      .from("packages")
+      .insert([{ name: input.name, price: input.price, description: input.description, package_type: 'services', total_uses, total_credits: null }])
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
 
-  const { error: itemsError } = await supabase.from("package_items").insert(
-    input.items.map((item, idx) => ({
-      package_id: pkg.id,
-      service_name: item.service_name,
-      total_uses: item.total_uses,
-      sort_order: idx,
-    }))
-  );
-  if (itemsError) throw new Error(itemsError.message);
+    const { error: itemsError } = await supabase.from("package_items").insert(
+      input.items.map((item, idx) => ({
+        package_id: pkg.id,
+        service_name: item.service_name,
+        total_uses: item.total_uses,
+        sort_order: idx,
+      }))
+    );
+    if (itemsError) throw new Error(itemsError.message);
+  } else {
+    if (!input.total_credits || input.total_credits <= 0) throw new Error("Total credits must be greater than 0");
+    const { error } = await supabase
+      .from("packages")
+      .insert([{ name: input.name, price: input.price, description: input.description, package_type: 'credit', total_uses: 0, total_credits: input.total_credits }]);
+    if (error) throw new Error(error.message);
+  }
   revalidatePath("/packages");
 }
 
 export async function updatePackage(
   id: string,
-  input: Partial<Pick<Package, "name" | "total_uses" | "price" | "description" | "is_active">> & {
+  input: Partial<Pick<Package, "name" | "total_uses" | "price" | "description" | "is_active" | "total_credits">> & {
     items?: { service_name: string; total_uses: number }[];
   }
 ): Promise<void> {
@@ -203,8 +213,11 @@ export async function deletePackage(id: string): Promise<void> {
             package_id: cp.package?.id ?? cp.package_id,
             package_code: cp.package?.package_code ?? null,
             package_name: cp.package?.name ?? "Unknown Package",
+            package_type: cp.package?.package_type ?? 'services',
             total_uses: cp.package?.total_uses ?? cp.remaining_uses,
+            total_credits: cp.package?.total_credits ?? null,
             remaining_uses: cp.remaining_uses,
+            remaining_credits: cp.remaining_credits ?? null,
             purchased_at: cp.purchased_at,
             expiry_date: cp.expiry_date,
             notes: cp.notes,
@@ -249,7 +262,9 @@ export async function deletePackage(id: string): Promise<void> {
       original_package_id: pkg.id,
       package_code: pkg.package_code,
       name: pkg.name,
+      package_type: pkg.package_type ?? 'services',
       total_uses: pkg.total_uses,
+      total_credits: pkg.total_credits ?? null,
       price: pkg.price,
       description: pkg.description,
       was_active: pkg.is_active,
@@ -329,7 +344,9 @@ export async function restoreArchivedPackage(archivedPackageId: string): Promise
       {
         id: archivedPackage.original_package_id,
         name: archivedPackage.name,
+        package_type: archivedPackage.package_type ?? 'services',
         total_uses: archivedPackage.total_uses,
+        total_credits: archivedPackage.total_credits ?? null,
         price: archivedPackage.price,
         description: archivedPackage.description,
         is_active: archivedPackage.was_active,
@@ -403,6 +420,7 @@ export async function restoreArchivedPackage(archivedPackageId: string): Promise
                   customer_id: acp.customer_id,
                   package_id: archivedPackage.original_package_id,
                   remaining_uses: acp.remaining_uses,
+                  remaining_credits: acp.remaining_credits ?? null,
                   purchased_at: acp.purchased_at,
                   expiry_date: acp.expiry_date,
                   notes: acp.notes,
@@ -801,6 +819,7 @@ export async function restoreArchivedCustomer(archivedCustomerId: string): Promi
         customer_id: archivedCustomer.original_customer_id,
         package_id: archivedPackage.package_id,
         remaining_uses: archivedPackage.remaining_uses,
+        remaining_credits: archivedPackage.remaining_credits ?? null,
         purchased_at: archivedPackage.purchased_at,
         expiry_date: archivedPackage.expiry_date,
         notes: archivedPackage.notes,
@@ -944,11 +963,17 @@ export async function getPackagesByCustomerId(customerId: string): Promise<Custo
     }
   }
 
-  return packages.map((pkg) => ({
-    ...pkg,
-    items: ((pkg.items ?? []) as CustomerPackageItem[]).sort((a, b) => a.sort_order - b.sort_order),
-    completed_at: pkg.remaining_uses <= 0 ? latestUsedAtByPackageId.get(pkg.id) ?? null : null,
-  }));
+  return packages.map((pkg) => {
+    const isCredit = (pkg.package?.package_type ?? 'services') === 'credit';
+    const isDepleted = isCredit
+      ? (pkg.remaining_credits ?? 1) <= 0
+      : pkg.remaining_uses <= 0;
+    return {
+      ...pkg,
+      items: ((pkg.items ?? []) as CustomerPackageItem[]).sort((a, b) => a.sort_order - b.sort_order),
+      completed_at: isDepleted ? latestUsedAtByPackageId.get(pkg.id) ?? null : null,
+    };
+  });
 }
 
 export async function createCustomerPackage(input: {
@@ -966,20 +991,22 @@ export async function createCustomerPackage(input: {
 
   if (pkgError || !pkg) throw new Error("Package not found");
 
+  const isCredit = (pkg.package_type ?? 'services') === 'credit';
   const items = ((pkg.items ?? []) as PackageItem[]).sort((a, b) => a.sort_order - b.sort_order);
-  const total_uses = items.length > 0
+  const total_uses = isCredit ? 0 : (items.length > 0
     ? items.reduce((sum, item) => sum + item.total_uses, 0)
-    : pkg.total_uses;
+    : pkg.total_uses);
+  const remaining_credits = isCredit ? (pkg.total_credits ?? 0) : null;
 
   const { data: customerPackage, error } = await supabase
     .from("customer_packages")
-    .insert([{ ...input, remaining_uses: total_uses }])
+    .insert([{ ...input, remaining_uses: total_uses, remaining_credits }])
     .select()
     .single();
 
   if (error) throw new Error(error.message);
 
-  if (items.length > 0) {
+  if (!isCredit && items.length > 0) {
     const { error: itemsError } = await supabase.from("customer_package_items").insert(
       items.map((item) => ({
         customer_package_id: customerPackage.id,
@@ -1028,8 +1055,11 @@ export async function deleteCustomerPackage(customerPackageId: string): Promise<
         package_id: cp.package?.id ?? cp.package_id,
         package_code: cp.package?.package_code ?? null,
         package_name: cp.package?.name ?? "Unknown Package",
+        package_type: cp.package?.package_type ?? 'services',
         total_uses: cp.package?.total_uses ?? cp.remaining_uses,
+        total_credits: cp.package?.total_credits ?? null,
         remaining_uses: cp.remaining_uses,
+        remaining_credits: cp.remaining_credits ?? null,
         purchased_at: cp.purchased_at,
         expiry_date: cp.expiry_date,
         notes: cp.notes,
@@ -1143,6 +1173,7 @@ export async function restoreArchivedCustomerPackage(archivedCustomerPackageId: 
       customer_id: archived.customer_id,
       package_id: archived.package_id,
       remaining_uses: archived.remaining_uses,
+      remaining_credits: archived.remaining_credits ?? null,
       purchased_at: archived.purchased_at,
       expiry_date: archived.expiry_date,
       notes: archived.notes,
@@ -1225,8 +1256,76 @@ export async function deductPackageUse(
   customerPackageItemId: string | null,
   notes?: string,
   usedAt?: string,
+  creditsUsed?: number,
+  creditServices?: { service_name: string; price: number }[],
 ): Promise<void> {
-  if (customerPackageItemId) {
+  if (creditServices && creditServices.length > 0) {
+    // Credit-type package deduction with per-service breakdown
+    const totalCredits = creditServices.reduce((sum, s) => sum + s.price, 0);
+    if (totalCredits <= 0) throw new Error("Total credits must be greater than 0");
+
+    const { data: cp, error: fetchError } = await supabase
+      .from("customer_packages")
+      .select("remaining_credits")
+      .eq("id", customerPackageId)
+      .single();
+
+    if (fetchError || !cp) throw new Error("Customer package not found");
+    const currentCredits = cp.remaining_credits ?? 0;
+    if (currentCredits <= 0) throw new Error("No remaining credits");
+
+    const cashTopup = Math.max(0, totalCredits - currentCredits);
+    const newCredits = Math.max(0, currentCredits - totalCredits);
+    const { error: updateError } = await supabase
+      .from("customer_packages")
+      .update({ remaining_credits: newCredits })
+      .eq("id", customerPackageId);
+    if (updateError) throw new Error(updateError.message);
+
+    const timestamp = usedAt ?? new Date().toISOString();
+    const logRows = creditServices.map((s, idx) => ({
+      customer_package_id: customerPackageId,
+      customer_package_item_id: null,
+      service_name: s.service_name,
+      credits_used: s.price,
+      cash_topup: idx === 0 && cashTopup > 0 ? cashTopup : null,
+      used_at: timestamp,
+      notes: notes ?? null,
+    }));
+    const { error: logError } = await supabase.from("package_usage_logs").insert(logRows);
+    if (logError) throw new Error(logError.message);
+  } else if (creditsUsed !== undefined) {
+    // Credit-type package deduction (legacy — no service breakdown)
+    if (creditsUsed <= 0) throw new Error("Credits used must be greater than 0");
+
+    const { data: cp, error: fetchError } = await supabase
+      .from("customer_packages")
+      .select("remaining_credits")
+      .eq("id", customerPackageId)
+      .single();
+
+    if (fetchError || !cp) throw new Error("Customer package not found");
+    const currentCredits = cp.remaining_credits ?? 0;
+    if (currentCredits <= 0) throw new Error("No remaining credits");
+    if (creditsUsed > currentCredits) throw new Error(`Only ${currentCredits} credits remaining`);
+
+    const newCredits = Math.max(0, currentCredits - creditsUsed);
+    const { error: updateError } = await supabase
+      .from("customer_packages")
+      .update({ remaining_credits: newCredits })
+      .eq("id", customerPackageId);
+    if (updateError) throw new Error(updateError.message);
+
+    const { error: logError } = await supabase.from("package_usage_logs").insert([{
+      customer_package_id: customerPackageId,
+      customer_package_item_id: null,
+      service_name: null,
+      credits_used: creditsUsed,
+      used_at: usedAt ?? new Date().toISOString(),
+      notes: notes ?? null,
+    }]);
+    if (logError) throw new Error(logError.message);
+  } else if (customerPackageItemId) {
     // Item-based deduction (new packages with items)
     const { data: item, error: fetchItemError } = await supabase
       .from("customer_package_items")

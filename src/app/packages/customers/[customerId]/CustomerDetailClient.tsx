@@ -69,8 +69,14 @@ export default function CustomerDetailClient({
   const todayLocal = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 10);
-  const activeCustomerPackages = customerPackages.filter((cp) => cp.remaining_uses > 0);
-  const completedCustomerPackages = customerPackages.filter((cp) => cp.remaining_uses <= 0);
+  const activeCustomerPackages = customerPackages.filter((cp) => {
+    const isCredit = cp.package?.package_type === 'credit';
+    return isCredit ? (cp.remaining_credits ?? 1) > 0 : cp.remaining_uses > 0;
+  });
+  const completedCustomerPackages = customerPackages.filter((cp) => {
+    const isCredit = cp.package?.package_type === 'credit';
+    return isCredit ? (cp.remaining_credits ?? 1) <= 0 : cp.remaining_uses <= 0;
+  });
 
   function handleDeductClose() {
     setDeductTarget(null);
@@ -300,7 +306,15 @@ export default function CustomerDetailClient({
                   </TableCell>
                   <TableCell className="font-medium whitespace-normal break-words max-w-[220px]">{cp.package?.name ?? "—"}</TableCell>
                   <TableCell className="whitespace-normal break-words max-w-[240px]">
-                    {cp.items && cp.items.length > 0 ? (
+                    {cp.package?.package_type === 'credit' ? (
+                      <Badge
+                        variant={
+                          (cp.remaining_credits ?? 0) <= 0 ? "destructive" : (cp.remaining_credits ?? 0) <= (cp.package?.total_credits ?? 0) * 0.25 ? "secondary" : "default"
+                        }
+                      >
+                        {cp.remaining_credits} / {cp.package?.total_credits} credits
+                      </Badge>
+                    ) : cp.items && cp.items.length > 0 ? (
                       <ul className="space-y-0.5 text-sm">
                         {cp.items.map((item) => (
                           <li key={item.id} className="flex items-center gap-1.5">
@@ -350,7 +364,11 @@ export default function CustomerDetailClient({
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
-                        disabled={cp.remaining_uses <= 0 || Boolean(isExpired)}
+                        disabled={(
+                          cp.package?.package_type === 'credit'
+                            ? (cp.remaining_credits ?? 0) <= 0
+                            : cp.remaining_uses <= 0
+                        ) || Boolean(isExpired)}
                         onClick={() => setDeductTarget(cp)}
                       >
                         Deduct Use
@@ -593,17 +611,30 @@ export default function CustomerDetailClient({
               )}
               {!loadingHistory && (() => {
                 // Group logs by exact used_at timestamp (same deduction session)
-                const groups: { used_at: string; services: string[]; notes: string }[] = [];
+                const groups: {
+                  used_at: string;
+                  serviceItems: { name: string; price: number | null }[];
+                  legacyCredits: number | null;
+                  cashTopup: number | null;
+                  notes: string;
+                }[] = [];
                 for (const log of historyLogs) {
                   const existing = groups.find((g) => g.used_at === log.used_at);
                   if (existing) {
-                    if (log.service_name && !existing.services.includes(log.service_name)) {
-                      existing.services.push(log.service_name);
+                    if (log.service_name && !existing.serviceItems.some((s) => s.name === log.service_name)) {
+                      existing.serviceItems.push({ name: log.service_name, price: log.credits_used ?? null });
+                    }
+                    if (log.cash_topup != null && existing.cashTopup == null) {
+                      existing.cashTopup = log.cash_topup;
                     }
                   } else {
                     groups.push({
                       used_at: log.used_at,
-                      services: log.service_name ? [log.service_name] : [],
+                      serviceItems: log.service_name
+                        ? [{ name: log.service_name, price: log.credits_used ?? null }]
+                        : [],
+                      legacyCredits: !log.service_name && log.credits_used != null ? log.credits_used : null,
+                      cashTopup: log.cash_topup ?? null,
                       notes: log.notes?.trim() ?? "",
                     });
                   }
@@ -614,7 +645,18 @@ export default function CustomerDetailClient({
                       {formatDateTimeMY(group.used_at)}
                     </TableCell>
                     <TableCell className="text-sm text-gray-700 whitespace-normal break-words">
-                      {group.services.length > 0 ? group.services.join(", ") : "—"}
+                      {group.serviceItems.length > 0
+                        ? <div className="flex flex-col gap-0.5">
+                            {group.serviceItems.map((s, j) => (
+                              <span key={j}>{s.price != null ? `${s.name}: ${s.price}` : s.name}</span>
+                            ))}
+                            {group.cashTopup != null && group.cashTopup > 0 && (
+                              <span className="text-amber-700 font-medium">Cash top-up: {group.cashTopup}</span>
+                            )}
+                          </div>
+                        : group.legacyCredits != null
+                        ? `${group.legacyCredits} credits`
+                        : "—"}
                     </TableCell>
                     <TableCell className="text-sm text-gray-700 whitespace-normal break-words max-w-[280px]">
                       {group.notes || "-"}

@@ -28,9 +28,11 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
   const [usedDateTime, setUsedDateTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [creditServices, setCreditServices] = useState<{ service_name: string; price: string }[]>([{ service_name: "", price: "" }]);
 
   const items: CustomerPackageItem[] = customerPackage?.items ?? [];
-  const hasItems = items.length > 0;
+  const isCredit = (customerPackage?.package?.package_type ?? 'services') === 'credit';
+  const hasItems = !isCredit && items.length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -40,6 +42,7 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
       .slice(0, 16);
     setUsedDateTime(local);
     setSelectedItemIds(new Set());
+    setCreditServices([{ service_name: "", price: "" }]);
     setNotes("");
   }, [open]);
 
@@ -52,9 +55,28 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
     });
   }
 
+  function updateCreditService(idx: number, field: "service_name" | "price", value: string) {
+    setCreditServices((prev) => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
+  }
+  function addCreditService() {
+    setCreditServices((prev) => [...prev, { service_name: "", price: "" }]);
+  }
+  function removeCreditService(idx: number) {
+    setCreditServices((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   const selectedCount = selectedItemIds.size;
+  const remaining = customerPackage?.remaining_credits ?? 0;
+  const totalCredits = creditServices.reduce((sum, s) => sum + (parseFloat(s.price) || 0), 0);
+  const cashTopup = Math.max(0, totalCredits - remaining);
   const canConfirm = !loading && !!notes.trim() && (
-    hasItems ? selectedCount > 0 : (customerPackage?.remaining_uses ?? 0) > 0
+    isCredit
+      ? creditServices.length > 0 &&
+        creditServices.every((s) => s.service_name.trim() !== "" && parseFloat(s.price) > 0) &&
+        totalCredits > 0
+      : hasItems
+      ? selectedCount > 0
+      : (customerPackage?.remaining_uses ?? 0) > 0
   );
 
   async function handleConfirm() {
@@ -62,7 +84,13 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
     setLoading(true);
     try {
       const usedAtIso = usedDateTime ? new Date(usedDateTime).toISOString() : undefined;
-      if (hasItems) {
+      if (isCredit) {
+        const services = creditServices.map((s) => ({ service_name: s.service_name.trim(), price: parseFloat(s.price) }));
+        await deductPackageUse(customerPackage.id, null, notes.trim(), usedAtIso, undefined, services);
+        const newRemaining = Math.max(0, (customerPackage.remaining_credits ?? 0) - totalCredits);
+        const topupMsg = cashTopup > 0 ? ` + ${cashTopup} cash top-up` : "";
+        toast.success(`${totalCredits} deducted ${topupMsg}. ${newRemaining} credits remaining.`);
+      } else if (hasItems) {
         for (const itemId of selectedItemIds) {
           await deductPackageUse(customerPackage.id, itemId, notes.trim(), usedAtIso);
         }
@@ -95,8 +123,80 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        {/* Item selection */}
-        {hasItems ? (
+        {/* Credit type: service + price list */}
+        {isCredit ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Credits Remaining</Label>
+              <span className="text-sm font-semibold">{remaining}</span>
+            </div>
+            <div className="space-y-1">
+              <Label>Services Performed <span className="text-red-500">*</span></Label>
+              <div className="space-y-2">
+                {creditServices.map((svc, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <Input
+                      placeholder="Service name"
+                      value={svc.service_name}
+                      onChange={(e) => updateCreditService(idx, "service_name", e.target.value)}
+                      className="flex-1"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Price"
+                      min={0.01}
+                      step="0.01"
+                      value={svc.price}
+                      onChange={(e) => updateCreditService(idx, "price", e.target.value)}
+                      className="w-28"
+                    />
+                    {creditServices.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeCreditService(idx)}
+                        className="text-gray-400 hover:text-red-500 text-lg leading-none"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={addCreditService}
+                className="text-sm text-blue-600 hover:underline mt-1"
+              >
+                + Add another service
+              </button>
+            </div>
+            {totalCredits > 0 && (
+              <div className="space-y-1 pt-2 border-t text-sm">
+                {cashTopup > 0 ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Credits from package</span>
+                      <span>{remaining}</span>
+                    </div>
+                    <div className="flex justify-between text-amber-700 font-medium">
+                      <span>Cash top-up required</span>
+                      <span>{cashTopup}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold border-t pt-1">
+                      <span>Total</span>
+                      <span>{totalCredits}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between font-semibold">
+                    <span>Total Credits to Deduct</span>
+                    <span>{totalCredits}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : hasItems ? (
           <div className="space-y-2">
             <Label>Select services to deduct <span className="text-gray-400 font-normal">(tap to toggle)</span></Label>
             <div className="space-y-1.5">
@@ -159,6 +259,8 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
           <Button onClick={handleConfirm} disabled={!canConfirm}>
             {loading
               ? "Processing..."
+              : isCredit
+              ? `Confirm — Deduct ${totalCredits > 0 ? Math.min(totalCredits, remaining) : "?"} Credits`
               : hasItems && selectedCount > 0
               ? `Confirm — Deduct ${selectedCount} Use${selectedCount > 1 ? "s" : ""}`
               : "Confirm — Deduct 1 Use"}

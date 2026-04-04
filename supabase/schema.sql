@@ -341,3 +341,37 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 --   ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- ALTER TABLE archived_customer_packages
 --   ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- -------------------------------------------------------
+-- MIGRATION: Credit-type packages
+-- Copy this block into Supabase SQL Editor and run it.
+-- -------------------------------------------------------
+-- -- Step 1: Add package_type and total_credits to packages
+-- ALTER TABLE packages
+--   ADD COLUMN IF NOT EXISTS package_type TEXT NOT NULL DEFAULT 'services'
+--     CHECK (package_type IN ('services', 'credit')),
+--   ADD COLUMN IF NOT EXISTS total_credits NUMERIC(10,2);
+--
+-- -- Step 2: Add remaining_credits to customer_packages
+-- ALTER TABLE customer_packages
+--   ADD COLUMN IF NOT EXISTS remaining_credits NUMERIC(10,2);
+--
+-- -- Step 3: Add credits_used to package_usage_logs
+-- ALTER TABLE package_usage_logs
+--   ADD COLUMN IF NOT EXISTS credits_used NUMERIC(10,2);
+--
+-- -- Step 4: Add credit fields to archive tables
+-- ALTER TABLE archived_packages
+--   ADD COLUMN IF NOT EXISTS package_type TEXT NOT NULL DEFAULT 'services',
+--   ADD COLUMN IF NOT EXISTS total_credits NUMERIC(10,2);
+-- ALTER TABLE archived_customer_packages
+--   ADD COLUMN IF NOT EXISTS package_type TEXT NOT NULL DEFAULT 'services',
+--   ADD COLUMN IF NOT EXISTS total_credits NUMERIC(10,2),
+--   ADD COLUMN IF NOT EXISTS remaining_credits NUMERIC(10,2);
+
+-- -------------------------------------------------------
+-- MIGRATION: Cash top-up for credit packages
+-- Copy this block into Supabase SQL Editor and run it.
+-- -------------------------------------------------------
+-- ALTER TABLE package_usage_logs
+--   ADD COLUMN IF NOT EXISTS cash_topup NUMERIC(10,2);
