@@ -252,7 +252,7 @@ export default function CustomerDetailClient({
               <TableHead>Customer Package ID</TableHead>
               <TableHead>Package ID</TableHead>
               <TableHead className="whitespace-normal break-words max-w-[220px]">Package Name</TableHead>
-              <TableHead>Remaining Uses</TableHead>
+              <TableHead className="whitespace-normal break-words max-w-[240px]">Services Remaining</TableHead>
               <TableHead>Purchase Date</TableHead>
               <TableHead>Expiry Date</TableHead>
               <TableHead>Status</TableHead>
@@ -299,18 +299,32 @@ export default function CustomerDetailClient({
                     )}
                   </TableCell>
                   <TableCell className="font-medium whitespace-normal break-words max-w-[220px]">{cp.package?.name ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        cp.remaining_uses === 0
-                          ? "destructive"
-                          : cp.remaining_uses <= 1
-                          ? "secondary"
-                          : "default"
-                      }
-                    >
-                      {cp.remaining_uses} left
-                    </Badge>
+                  <TableCell className="whitespace-normal break-words max-w-[240px]">
+                    {cp.items && cp.items.length > 0 ? (
+                      <ul className="space-y-0.5 text-sm">
+                        {cp.items.map((item) => (
+                          <li key={item.id} className="flex items-center gap-1.5">
+                            <Badge
+                              variant={
+                                item.remaining_uses === 0 ? "destructive" : item.remaining_uses <= 1 ? "secondary" : "default"
+                              }
+                              className="text-xs"
+                            >
+                              {item.remaining_uses}/{item.total_uses}
+                            </Badge>
+                            <span className="text-gray-700">{item.service_name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <Badge
+                        variant={
+                          cp.remaining_uses === 0 ? "destructive" : cp.remaining_uses <= 1 ? "secondary" : "default"
+                        }
+                      >
+                        {cp.remaining_uses} left
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-gray-500 text-sm">
                     {formatDateMY(cp.purchased_at)}
@@ -339,7 +353,7 @@ export default function CustomerDetailClient({
                         disabled={cp.remaining_uses <= 0 || Boolean(isExpired)}
                         onClick={() => setDeductTarget(cp)}
                       >
-                        Use 1 Session
+                        Deduct Use
                       </Button>
                       <Button
                         size="icon-sm"
@@ -558,7 +572,8 @@ export default function CustomerDetailClient({
             <TableHeader>
               <TableRow>
                 <TableHead>Used Date & Time</TableHead>
-                <TableHead className="whitespace-normal break-all max-w-[280px]">Notes</TableHead>
+                <TableHead className="whitespace-normal break-words">Service</TableHead>
+                <TableHead className="whitespace-normal break-words max-w-[280px]">Notes</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -576,16 +591,37 @@ export default function CustomerDetailClient({
                   </TableCell>
                 </TableRow>
               )}
-              {!loadingHistory && historyLogs.map((log) => (
-                <TableRow key={log.id}>
-                  <TableCell className="text-sm text-gray-700">
-                    {formatDateTimeMY(log.used_at)}
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-700 whitespace-normal break-all max-w-[280px]">
-                    {log.notes?.trim() ? log.notes : "-"}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {!loadingHistory && (() => {
+                // Group logs by exact used_at timestamp (same deduction session)
+                const groups: { used_at: string; services: string[]; notes: string }[] = [];
+                for (const log of historyLogs) {
+                  const existing = groups.find((g) => g.used_at === log.used_at);
+                  if (existing) {
+                    if (log.service_name && !existing.services.includes(log.service_name)) {
+                      existing.services.push(log.service_name);
+                    }
+                  } else {
+                    groups.push({
+                      used_at: log.used_at,
+                      services: log.service_name ? [log.service_name] : [],
+                      notes: log.notes?.trim() ?? "",
+                    });
+                  }
+                }
+                return groups.map((group, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-sm text-gray-700">
+                      {formatDateTimeMY(group.used_at)}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-700 whitespace-normal break-words">
+                      {group.services.length > 0 ? group.services.join(", ") : "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-700 whitespace-normal break-words max-w-[280px]">
+                      {group.notes || "-"}
+                    </TableCell>
+                  </TableRow>
+                ));
+              })()}
             </TableBody>
           </Table>
         </DialogContent>

@@ -10,6 +10,8 @@ import {
   ArchivedCustomer,
   ArchivedCustomerPackage,
   Appointment,
+  PackageItem,
+  CustomerPackageItem,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -85,46 +87,93 @@ async function generateUniqueCustomerCode(): Promise<string> {
 export async function getPackages(): Promise<Package[]> {
   const { data, error } = await supabase
     .from("packages")
-    .select("*")
+    .select("*, items:package_items(*)")
     .order("created_at", { ascending: true });
 
   if (error) throw new Error(error.message);
-  return data ?? [];
+  return (data ?? []).map((pkg: any) => ({
+    ...pkg,
+    items: ((pkg.items ?? []) as PackageItem[]).sort((a, b) => a.sort_order - b.sort_order),
+  })) as Package[];
 }
 
 export async function createPackage(input: {
   name: string;
-  total_uses: number;
   price: number;
   description?: string;
+  items: { service_name: string; total_uses: number }[];
 }): Promise<void> {
-  const { error } = await supabase.from("packages").insert([input]);
+  if (input.items.length === 0) throw new Error("At least one service item is required");
+  const total_uses = input.items.reduce((sum, item) => sum + item.total_uses, 0);
+
+  const { data: pkg, error } = await supabase
+    .from("packages")
+    .insert([{ name: input.name, price: input.price, description: input.description, total_uses }])
+    .select()
+    .single();
   if (error) throw new Error(error.message);
+
+  const { error: itemsError } = await supabase.from("package_items").insert(
+    input.items.map((item, idx) => ({
+      package_id: pkg.id,
+      service_name: item.service_name,
+      total_uses: item.total_uses,
+      sort_order: idx,
+    }))
+  );
+  if (itemsError) throw new Error(itemsError.message);
   revalidatePath("/packages");
 }
 
 export async function updatePackage(
   id: string,
-  input: Partial<Pick<Package, "name" | "total_uses" | "price" | "description" | "is_active">>
+  input: Partial<Pick<Package, "name" | "total_uses" | "price" | "description" | "is_active">> & {
+    items?: { service_name: string; total_uses: number }[];
+  }
 ): Promise<void> {
-  const { error } = await supabase.from("packages").update(input).eq("id", id);
-  if (error) throw new Error(error.message);
+  const { items, ...packageData } = input;
+
+  if (items !== undefined) {
+    packageData.total_uses = items.reduce((sum, item) => sum + item.total_uses, 0);
+  }
+
+  if (Object.keys(packageData).length > 0) {
+    const { error } = await supabase.from("packages").update(packageData).eq("id", id);
+    if (error) throw new Error(error.message);
+  }
+
+  if (items !== undefined) {
+    await supabase.from("package_items").delete().eq("package_id", id);
+    if (items.length > 0) {
+      const { error: itemsError } = await supabase.from("package_items").insert(
+        items.map((item, idx) => ({
+          package_id: id,
+          service_name: item.service_name,
+          total_uses: item.total_uses,
+          sort_order: idx,
+        }))
+      );
+      if (itemsError) throw new Error(itemsError.message);
+    }
+  }
+
   revalidatePath("/packages");
 }
 
 export async function deletePackage(id: string): Promise<void> {
   const { data: pkg, error: fetchError } = await supabase
     .from("packages")
-    .select("*")
+    .select("*, items:package_items(*)")
     .eq("id", id)
     .single();
 
   if (fetchError || !pkg) throw new Error("Package not found");
+  const pkgItems = ((pkg.items ?? []) as PackageItem[]).sort((a, b) => a.sort_order - b.sort_order);
 
   // Get all customer packages using this package type
   const { data: customerPackages, error: cpError } = await supabase
     .from("customer_packages")
-    .select("*, customer:customers(*), package:packages(*)")
+    .select("*, customer:customers(*), package:packages(*), items:customer_package_items(*)")
     .eq("package_id", id);
 
   if (cpError) throw new Error(cpError.message);
@@ -163,6 +212,12 @@ export async function deletePackage(id: string): Promise<void> {
               used_at: log.used_at,
               notes: log.notes,
             })),
+            items: ((cp.items ?? []) as CustomerPackageItem[]).map((item) => ({
+              service_name: item.service_name,
+              total_uses: item.total_uses,
+              remaining_uses: item.remaining_uses,
+              sort_order: item.sort_order,
+            })),
           },
         ]);
 
@@ -199,6 +254,11 @@ export async function deletePackage(id: string): Promise<void> {
       description: pkg.description,
       was_active: pkg.is_active,
       created_at: pkg.created_at,
+      items: pkgItems.map((item) => ({
+        service_name: item.service_name,
+        total_uses: item.total_uses,
+        sort_order: item.sort_order,
+      })),
     },
   ]);
 
@@ -279,7 +339,19 @@ export async function restoreArchivedPackage(archivedPackageId: string): Promise
 
   if (restorePackageError) throw new Error(restorePackageError.message);
 
-  // Get all archived customer packages that were deleted when this package was deleted
+  // Restore package items from snapshot
+  const archivedPkgItems = Array.isArray(archivedPackage.items) ? archivedPackage.items : [];
+  if (archivedPkgItems.length > 0) {
+    await supabase.from("package_items").insert(
+      archivedPkgItems.map((item: any) => ({
+        package_id: archivedPackage.original_package_id,
+        service_name: item.service_name,
+        total_uses: item.total_uses,
+        sort_order: item.sort_order ?? 0,
+      }))
+    );
+    // Ignore errors on item restoration (best-effort)
+  }
   // Use a time window because customer packages are archived slightly before the package type
   // (they're archived in a loop, then the package type is archived)
   const packageDeletedAt = new Date(archivedPackage.deleted_at);
@@ -338,6 +410,19 @@ export async function restoreArchivedPackage(archivedPackageId: string): Promise
               ]);
 
             if (!restoreCpError) {
+              // Restore customer_package_items from snapshot
+              const cpItems = Array.isArray(acp.items) ? acp.items : [];
+              if (cpItems.length > 0) {
+                await supabase.from("customer_package_items").insert(
+                  cpItems.map((item: any) => ({
+                    customer_package_id: acp.original_customer_package_id,
+                    service_name: item.service_name,
+                    total_uses: item.total_uses,
+                    remaining_uses: item.remaining_uses,
+                    sort_order: item.sort_order ?? 0,
+                  }))
+                );
+              }
               // Successfully restored, now restore usage logs
               if (acp.usage_logs && Array.isArray(acp.usage_logs) && acp.usage_logs.length > 0) {
                 const usageLogsToInsert = acp.usage_logs.map((log: any) => ({
@@ -531,7 +616,7 @@ export async function deleteCustomer(id: string): Promise<void> {
   // Delete dependency chain: usage_logs -> customer_packages -> customer
   const { data: customerPackages, error: fetchPackagesError } = await supabase
     .from("customer_packages")
-    .select("*, package:packages(*)")
+    .select("*, package:packages(*), items:customer_package_items(*)")
     .eq("customer_id", id);
 
   if (fetchPackagesError) throw new Error(fetchPackagesError.message);
@@ -571,6 +656,12 @@ export async function deleteCustomer(id: string): Promise<void> {
         expiry_date: cp.expiry_date,
         notes: cp.notes,
         usage_logs: cpUsageLogs,
+        items: ((cp.items ?? []) as CustomerPackageItem[]).map((item) => ({
+          service_name: item.service_name,
+          total_uses: item.total_uses,
+          remaining_uses: item.remaining_uses,
+          sort_order: item.sort_order,
+        })),
       };
     });
 
@@ -827,7 +918,7 @@ export async function getPackagesByCustomerId(customerId: string): Promise<Custo
 
   const { data, error } = await supabase
     .from("customer_packages")
-    .select("*, customer:customers(*), package:packages(*)")
+    .select("*, customer:customers(*), package:packages(*), items:customer_package_items(*)")
     .eq("customer_id", customerId)
     .order("purchased_at", { ascending: false });
 
@@ -855,6 +946,7 @@ export async function getPackagesByCustomerId(customerId: string): Promise<Custo
 
   return packages.map((pkg) => ({
     ...pkg,
+    items: ((pkg.items ?? []) as CustomerPackageItem[]).sort((a, b) => a.sort_order - b.sort_order),
     completed_at: pkg.remaining_uses <= 0 ? latestUsedAtByPackageId.get(pkg.id) ?? null : null,
   }));
 }
@@ -865,23 +957,41 @@ export async function createCustomerPackage(input: {
   expiry_date?: string;
   notes?: string;
 }): Promise<void> {
-  // Fetch the package to get total_uses
+  // Fetch the package with its items
   const { data: pkg, error: pkgError } = await supabase
     .from("packages")
-    .select("total_uses")
+    .select("*, items:package_items(*)")
     .eq("id", input.package_id)
     .single();
 
   if (pkgError || !pkg) throw new Error("Package not found");
 
-  const { error } = await supabase.from("customer_packages").insert([
-    {
-      ...input,
-      remaining_uses: pkg.total_uses,
-    },
-  ]);
+  const items = ((pkg.items ?? []) as PackageItem[]).sort((a, b) => a.sort_order - b.sort_order);
+  const total_uses = items.length > 0
+    ? items.reduce((sum, item) => sum + item.total_uses, 0)
+    : pkg.total_uses;
+
+  const { data: customerPackage, error } = await supabase
+    .from("customer_packages")
+    .insert([{ ...input, remaining_uses: total_uses }])
+    .select()
+    .single();
 
   if (error) throw new Error(error.message);
+
+  if (items.length > 0) {
+    const { error: itemsError } = await supabase.from("customer_package_items").insert(
+      items.map((item) => ({
+        customer_package_id: customerPackage.id,
+        service_name: item.service_name,
+        total_uses: item.total_uses,
+        remaining_uses: item.total_uses,
+        sort_order: item.sort_order,
+      }))
+    );
+    if (itemsError) throw new Error(itemsError.message);
+  }
+
   revalidatePath("/packages/customers");
 }
 
@@ -892,7 +1002,7 @@ export async function deleteCustomerPackage(customerPackageId: string): Promise<
 
   const { data: cp, error: fetchCpError } = await supabase
     .from("customer_packages")
-    .select("*, customer:customers(*), package:packages(*)")
+    .select("*, customer:customers(*), package:packages(*), items:customer_package_items(*)")
     .eq("id", customerPackageId)
     .single();
 
@@ -927,6 +1037,12 @@ export async function deleteCustomerPackage(customerPackageId: string): Promise<
           used_at: log.used_at,
           notes: log.notes,
         })),
+        items: ((cp.items ?? []) as CustomerPackageItem[]).map((item) => ({
+          service_name: item.service_name,
+          total_uses: item.total_uses,
+          remaining_uses: item.remaining_uses,
+          sort_order: item.sort_order,
+        })),
       },
     ]);
 
@@ -956,8 +1072,6 @@ export async function getArchivedCustomerPackagesByCustomerId(
   customerId: string
 ): Promise<ArchivedCustomerPackage[]> {
   if (!customerId || !UUID_REGEX.test(customerId)) return [];
-
-  await purgeExpiredArchiveRecords();
 
   const { data, error } = await supabase
     .from("archived_customer_packages")
@@ -1037,6 +1151,21 @@ export async function restoreArchivedCustomerPackage(archivedCustomerPackageId: 
 
   if (restoreError) throw new Error(restoreError.message);
 
+  // Restore customer_package_items from snapshot
+  const archivedItems = Array.isArray(archived.items) ? archived.items : [];
+  if (archivedItems.length > 0) {
+    await supabase.from("customer_package_items").insert(
+      archivedItems.map((item: any) => ({
+        customer_package_id: archived.original_customer_package_id,
+        service_name: item.service_name,
+        total_uses: item.total_uses,
+        remaining_uses: item.remaining_uses,
+        sort_order: item.sort_order ?? 0,
+      }))
+    );
+    // Ignore errors on item restoration (best-effort)
+  }
+
   const restoredLogs: Array<{ used_at: string; notes: string | null }> =
     Array.isArray(archived.usage_logs) ? archived.usage_logs : [];
   if (restoredLogs.length > 0) {
@@ -1093,37 +1222,72 @@ export async function permanentlyDeleteArchivedCustomerPackage(archivedCustomerP
 
 export async function deductPackageUse(
   customerPackageId: string,
+  customerPackageItemId: string | null,
   notes?: string,
-  usedAt?: string
+  usedAt?: string,
 ): Promise<void> {
-  // Fetch current remaining_uses
-  const { data: cp, error: fetchError } = await supabase
-    .from("customer_packages")
-    .select("remaining_uses")
-    .eq("id", customerPackageId)
-    .single();
+  if (customerPackageItemId) {
+    // Item-based deduction (new packages with items)
+    const { data: item, error: fetchItemError } = await supabase
+      .from("customer_package_items")
+      .select("remaining_uses, service_name")
+      .eq("id", customerPackageItemId)
+      .single();
 
-  if (fetchError || !cp) throw new Error("Customer package not found");
-  if (cp.remaining_uses <= 0) throw new Error("No remaining uses left");
+    if (fetchItemError || !item) throw new Error("Package item not found");
+    if (item.remaining_uses <= 0) throw new Error(`No remaining uses for "${item.service_name}"`);
 
-  // Deduct one use
-  const { error: updateError } = await supabase
-    .from("customer_packages")
-    .update({ remaining_uses: cp.remaining_uses - 1 })
-    .eq("id", customerPackageId);
+    const { error: updateItemError } = await supabase
+      .from("customer_package_items")
+      .update({ remaining_uses: item.remaining_uses - 1 })
+      .eq("id", customerPackageItemId);
 
-  if (updateError) throw new Error(updateError.message);
+    if (updateItemError) throw new Error(updateItemError.message);
 
-  // Log the usage
-  const { error: logError } = await supabase.from("package_usage_logs").insert([
-    {
+    // Recompute and sync customer_packages.remaining_uses
+    const { data: allItems } = await supabase
+      .from("customer_package_items")
+      .select("remaining_uses")
+      .eq("customer_package_id", customerPackageId);
+    const newTotal = (allItems ?? []).reduce((sum: number, i: any) => sum + i.remaining_uses, 0);
+    await supabase.from("customer_packages").update({ remaining_uses: newTotal }).eq("id", customerPackageId);
+
+    const { error: logError } = await supabase.from("package_usage_logs").insert([{
       customer_package_id: customerPackageId,
+      customer_package_item_id: customerPackageItemId,
+      service_name: item.service_name,
       used_at: usedAt ?? new Date().toISOString(),
       notes: notes ?? null,
-    },
-  ]);
+    }]);
+    if (logError) throw new Error(logError.message);
+  } else {
+    // Legacy: deduct from the whole package (packages without items)
+    const { data: cp, error: fetchError } = await supabase
+      .from("customer_packages")
+      .select("remaining_uses")
+      .eq("id", customerPackageId)
+      .single();
 
-  if (logError) throw new Error(logError.message);
+    if (fetchError || !cp) throw new Error("Customer package not found");
+    if (cp.remaining_uses <= 0) throw new Error("No remaining uses left");
+
+    const { error: updateError } = await supabase
+      .from("customer_packages")
+      .update({ remaining_uses: cp.remaining_uses - 1 })
+      .eq("id", customerPackageId);
+
+    if (updateError) throw new Error(updateError.message);
+
+    const { error: logError } = await supabase.from("package_usage_logs").insert([{
+      customer_package_id: customerPackageId,
+      customer_package_item_id: null,
+      service_name: null,
+      used_at: usedAt ?? new Date().toISOString(),
+      notes: notes ?? null,
+    }]);
+    if (logError) throw new Error(logError.message);
+  }
+
   revalidatePath("/packages/customers");
 }
 

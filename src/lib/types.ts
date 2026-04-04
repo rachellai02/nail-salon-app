@@ -1,5 +1,22 @@
 // Types matching the Supabase database schema
 
+export type PackageItem = {
+  id: string;
+  package_id: string;
+  service_name: string;
+  total_uses: number;
+  sort_order: number;
+};
+
+export type CustomerPackageItem = {
+  id: string;
+  customer_package_id: string;
+  service_name: string;
+  total_uses: number;
+  remaining_uses: number;
+  sort_order: number;
+};
+
 export type Package = {
   id: string;
   package_code: number;
@@ -9,6 +26,7 @@ export type Package = {
   description: string | null;
   is_active: boolean;
   created_at: string;
+  items?: PackageItem[];
 };
 
 export type Customer = {
@@ -32,11 +50,14 @@ export type CustomerPackage = {
   // Joined fields
   customer?: Customer;
   package?: Package;
+  items?: CustomerPackageItem[];
 };
 
 export type PackageUsageLog = {
   id: string;
   customer_package_id: string;
+  customer_package_item_id: string | null;
+  service_name: string | null;
   used_at: string;
   notes: string | null;
 };
@@ -67,6 +88,7 @@ export type ArchivedPackage = {
   was_active: boolean;
   created_at: string;
   deleted_at: string;
+  items: Array<{ service_name: string; total_uses: number; sort_order: number }>;
 };
 
 export type ArchivedCustomer = {
@@ -99,5 +121,11 @@ export type ArchivedCustomerPackage = {
     used_at: string;
     notes: string | null;
   }> | null;
+  items: Array<{
+    service_name: string;
+    total_uses: number;
+    remaining_uses: number;
+    sort_order: number;
+  }>;
   deleted_at: string;
 };

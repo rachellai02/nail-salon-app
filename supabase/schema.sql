@@ -305,3 +305,39 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 -- CREATE INDEX IF NOT EXISTS idx_archived_packages_deleted_at ON archived_packages(deleted_at);
 -- CREATE INDEX IF NOT EXISTS idx_archived_customers_deleted_at ON archived_customers(deleted_at);
 -- CREATE INDEX IF NOT EXISTS idx_archived_customer_packages_customer ON archived_customer_packages(customer_id);
+
+-- -------------------------------------------------------
+-- MIGRATION: Multi-item packages
+-- Copy this block into Supabase SQL Editor and run it.
+-- -------------------------------------------------------
+-- -- Step 1: Add package_items table
+-- CREATE TABLE IF NOT EXISTS package_items (
+--   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   package_id   UUID NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+--   service_name TEXT NOT NULL,
+--   total_uses   INTEGER NOT NULL DEFAULT 1,
+--   sort_order   INTEGER NOT NULL DEFAULT 0
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_package_items_package ON package_items(package_id);
+--
+-- -- Step 2: Add customer_package_items table
+-- CREATE TABLE IF NOT EXISTS customer_package_items (
+--   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   customer_package_id UUID NOT NULL REFERENCES customer_packages(id) ON DELETE CASCADE,
+--   service_name        TEXT NOT NULL,
+--   total_uses          INTEGER NOT NULL,
+--   remaining_uses      INTEGER NOT NULL,
+--   sort_order          INTEGER NOT NULL DEFAULT 0
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_customer_package_items_cp ON customer_package_items(customer_package_id);
+--
+-- -- Step 3: Alter package_usage_logs to track per-item deductions
+-- ALTER TABLE package_usage_logs
+--   ADD COLUMN IF NOT EXISTS customer_package_item_id UUID REFERENCES customer_package_items(id) ON DELETE SET NULL,
+--   ADD COLUMN IF NOT EXISTS service_name TEXT;
+--
+-- -- Step 4: Add items snapshot columns to archive tables
+-- ALTER TABLE archived_packages
+--   ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- ALTER TABLE archived_customer_packages
+--   ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
