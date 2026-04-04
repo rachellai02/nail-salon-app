@@ -397,3 +397,40 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 -- );
 --
 -- CREATE INDEX IF NOT EXISTS idx_services_category ON services(category_id);
+--
+-- -- Step N: Create sales_transactions table
+-- CREATE TABLE IF NOT EXISTS sales_transactions (
+--   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   receipt_no     TEXT NOT NULL,
+--   transacted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--   payment_type   TEXT NOT NULL,
+--   total          NUMERIC(10, 2) NOT NULL,
+--   cash_received  NUMERIC(10, 2),
+--   change_given   NUMERIC(10, 2),
+--   customer_id    UUID REFERENCES customers(id) ON DELETE SET NULL,
+--   customer_name  TEXT,
+--   customer_phone TEXT,
+--   items          JSONB NOT NULL DEFAULT '[]'::jsonb,
+--   is_voided      BOOLEAN NOT NULL DEFAULT FALSE
+-- );
+--
+-- CREATE INDEX IF NOT EXISTS idx_sales_transactions_date ON sales_transactions(transacted_at);
+--
+-- -- Step N+1: Add is_voided column (run if table already exists)
+-- ALTER TABLE sales_transactions ADD COLUMN IF NOT EXISTS is_voided BOOLEAN NOT NULL DEFAULT FALSE;
+--
+-- -- Step N+2: Create archived_transactions table
+-- CREATE TABLE IF NOT EXISTS archived_transactions (
+--   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   receipt_no     TEXT NOT NULL,
+--   transacted_at  TIMESTAMPTZ NOT NULL,
+--   payment_type   TEXT NOT NULL,
+--   total          NUMERIC(10, 2) NOT NULL,
+--   cash_received  NUMERIC(10, 2),
+--   change_given   NUMERIC(10, 2),
+--   customer_name  TEXT,
+--   customer_phone TEXT,
+--   items          JSONB NOT NULL DEFAULT '[]'::jsonb,
+--   is_voided      BOOLEAN NOT NULL DEFAULT FALSE,
+--   deleted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );

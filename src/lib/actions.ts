@@ -2,6 +2,7 @@
 
 import { randomInt } from "crypto";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   Package,
   CustomerPackage,
@@ -14,6 +15,9 @@ import {
   CustomerPackageItem,
   ServiceCategory,
   Service,
+  Transaction,
+  TransactionItem,
+  ArchivedTransaction,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -1587,4 +1591,161 @@ export async function reorderServices(orderedIds: string[]): Promise<void> {
     if (error) throw new Error(error.message);
   }
   revalidatePath("/services");
+}
+
+// -------------------------------------------------------
+// SALES TRANSACTIONS
+// -------------------------------------------------------
+
+export async function createTransaction(input: {
+  receipt_no: string;
+  payment_type: string;
+  total: number;
+  cash_received?: number | null;
+  change_given?: number | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  items: TransactionItem[];
+}): Promise<Transaction> {
+  const { data, error } = await supabase
+    .from("sales_transactions")
+    .insert([{
+      receipt_no: input.receipt_no,
+      payment_type: input.payment_type,
+      total: input.total,
+      cash_received: input.cash_received ?? null,
+      change_given: input.change_given ?? null,
+      customer_id: input.customer_id ?? null,
+      customer_name: input.customer_name ?? null,
+      customer_phone: input.customer_phone ?? null,
+      items: input.items,
+    }])
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/sales");
+  return data;
+}
+
+export async function getTransactionsByMonth(year: number, month: number): Promise<Transaction[]> {
+  // month is 1-based
+  const from = new Date(year, month - 1, 1).toISOString();
+  const to = new Date(year, month, 1).toISOString();
+  const { data, error } = await supabase
+    .from("sales_transactions")
+    .select("*")
+    .gte("transacted_at", from)
+    .lt("transacted_at", to)
+    .order("transacted_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Transaction[];
+}
+
+export async function voidTransaction(id: string): Promise<void> {
+  if (!UUID_REGEX.test(id)) throw new Error("Invalid transaction id");
+  const { error } = await supabaseAdmin
+    .from("sales_transactions")
+    .update({ is_voided: true })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/sales");
+}
+
+export async function getTransactionsByDate(date: string): Promise<Transaction[]> {
+  // date is "yyyy-MM-dd"
+  const from = new Date(`${date}T00:00:00`).toISOString();
+  const to = new Date(`${date}T23:59:59.999`).toISOString();
+  const { data, error } = await supabase
+    .from("sales_transactions")
+    .select("*")
+    .gte("transacted_at", from)
+    .lte("transacted_at", to)
+    .order("transacted_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Transaction[];
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  if (!UUID_REGEX.test(id)) throw new Error("Invalid transaction id");
+
+  // Fetch the row first so we can archive it
+  const { data: tx, error: fetchError } = await supabaseAdmin
+    .from("sales_transactions")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (fetchError) throw new Error(fetchError.message);
+
+  // Insert into archive
+  const { error: archiveError } = await supabaseAdmin
+    .from("archived_transactions")
+    .insert([{
+      receipt_no: tx.receipt_no,
+      transacted_at: tx.transacted_at,
+      payment_type: tx.payment_type,
+      total: tx.total,
+      cash_received: tx.cash_received,
+      change_given: tx.change_given,
+      customer_name: tx.customer_name,
+      customer_phone: tx.customer_phone,
+      items: tx.items,
+      is_voided: tx.is_voided,
+    }]);
+  if (archiveError) throw new Error(archiveError.message);
+
+  // Now delete from live table
+  const { error } = await supabaseAdmin
+    .from("sales_transactions")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/sales");
+}
+
+export async function getArchivedTransactions(): Promise<ArchivedTransaction[]> {
+  const { data, error } = await supabase
+    .from("archived_transactions")
+    .select("*")
+    .order("deleted_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ArchivedTransaction[];
+}
+
+export async function restoreArchivedTransaction(archivedId: string): Promise<void> {
+  if (!UUID_REGEX.test(archivedId)) throw new Error("Invalid archived transaction id");
+
+  // Fetch the archived row
+  const { data: archived, error: fetchError } = await supabaseAdmin
+    .from("archived_transactions")
+    .select("*")
+    .eq("id", archivedId)
+    .single();
+  if (fetchError || !archived) throw new Error("Archived transaction not found");
+
+  // Re-insert into sales_transactions
+  const { error: restoreError } = await supabaseAdmin
+    .from("sales_transactions")
+    .insert([{
+      receipt_no: archived.receipt_no,
+      transacted_at: archived.transacted_at,
+      payment_type: archived.payment_type,
+      total: archived.total,
+      cash_received: archived.cash_received,
+      change_given: archived.change_given,
+      customer_name: archived.customer_name,
+      customer_phone: archived.customer_phone,
+      items: archived.items,
+      is_voided: archived.is_voided,
+    }]);
+  if (restoreError) throw new Error(restoreError.message);
+
+  // Remove from archive
+  const { error: deleteError } = await supabaseAdmin
+    .from("archived_transactions")
+    .delete()
+    .eq("id", archivedId);
+  if (deleteError) throw new Error(deleteError.message);
+
+  revalidatePath("/sales");
 }

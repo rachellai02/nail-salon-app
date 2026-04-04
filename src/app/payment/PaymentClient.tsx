@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useId } from "react";
+import { useState, useEffect, useId, useRef } from "react";
 import { ServiceCategory, Service, Customer } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { CustomerFormDialog } from "@/components/CustomerFormDialog";
+import { ReceiptView } from "@/components/ReceiptView";
+import { createTransaction } from "@/lib/actions";
 import { X, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,7 +33,7 @@ const PAYMENT_TYPES: PaymentType[] = [
   "Package",
 ];
 
-type DialogStep = "confirm" | "success" | "receipt";
+type DialogStep = "confirm" | "cash-entry" | "success" | "receipt-preview" | "receipt";
 
 type Props = {
   categories: ServiceCategory[];
@@ -63,11 +65,14 @@ export default function PaymentClient({ categories, customers }: Props) {
   const [customerQuery, setCustomerQuery] = useState("");
   const [receiptCustomer, setReceiptCustomer] = useState<Customer | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [receiptNo, setReceiptNo] = useState("");
+  const [receiptDate, setReceiptDate] = useState("");
+  const [cashReceived, setCashReceived] = useState("");
   const uid = useId();
-  let counter = 0;
+  const counterRef = useRef(0);
 
   function addToCart(svc: Service) {
-    const key = `${uid}-${counter++}-${svc.id}`;
+    const key = `${uid}-${counterRef.current++}-${svc.id}`;
     setCart((prev) => [
       ...prev,
       {
@@ -106,23 +111,91 @@ export default function PaymentClient({ categories, customers }: Props) {
     setCustomerQuery("");
     setReceiptCustomer(null);
     setRegisterOpen(false);
+    setCashReceived("");
     setDialogOpen(true);
   }
 
+  function generateReceiptNo(): string {
+    try {
+      const stored = localStorage.getItem("receipt_counter");
+      const current = stored ? parseInt(stored, 10) : 11111110;
+      const next = current + 1;
+      localStorage.setItem("receipt_counter", String(next));
+      return String(next);
+    } catch {
+      return "11111111";
+    }
+  }
+
   function handlePay() {
+    if (paymentType === "Cash") {
+      setCashReceived("");
+      setDialogStep("cash-entry");
+    } else {
+      setReceiptNo(generateReceiptNo());
+      setReceiptDate(
+        new Date().toLocaleString("en-MY", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        })
+      );
+      setDialogStep("success");
+    }
+  }
+
+  function handleCashConfirm() {
+    setReceiptNo(generateReceiptNo());
+    setReceiptDate(
+      new Date().toLocaleString("en-MY", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    );
     setDialogStep("success");
   }
 
   function handleSendReceipt() {
+    setDialogStep("receipt-preview");
+  }
+
+  function handleProceedToSend() {
     setCustomerQuery("");
     setReceiptCustomer(null);
     setRegisterOpen(false);
     setDialogStep("receipt");
   }
 
-  function handleDoSend() {
+  async function handleDoSend() {
     const phone = receiptCustomer?.contact_number ?? "";
     const name = receiptCustomer?.name ?? "";
+    try {
+      await createTransaction({
+        receipt_no: receiptNo,
+        payment_type: paymentType ?? "",
+        total,
+        cash_received: paymentType === "Cash" && cashReceived ? parseFloat(cashReceived) : null,
+        change_given: paymentType === "Cash" && cashReceived ? Math.max(0, parseFloat(cashReceived) - total) : null,
+        customer_id: receiptCustomer?.id ?? null,
+        customer_name: name || null,
+        customer_phone: phone || null,
+        items: cart.map((item) => ({
+          service_name: item.service.name,
+          qty: parseFloat(item.qty) || 1,
+          unit_price: parseFloat(item.price) || 0,
+          subtotal: (parseFloat(item.qty) || 1) * (parseFloat(item.price) || 0),
+        })),
+      });
+    } catch {
+      // non-blocking — receipt still sends even if DB save fails
+    }
     toast.success(`Receipt sent to ${name} (${phone})`);
     setDialogOpen(false);
     clearCart();
@@ -131,7 +204,7 @@ export default function PaymentClient({ categories, customers }: Props) {
   function handleDialogClose(open: boolean) {
     if (!open) {
       setDialogOpen(false);
-      if (dialogStep === "receipt") {
+      if (dialogStep === "receipt" || dialogStep === "receipt-preview" || dialogStep === "cash-entry") {
         clearCart();
       }
     }
@@ -149,6 +222,8 @@ export default function PaymentClient({ categories, customers }: Props) {
     const q = parseFloat(item.qty);
     return sum + (isNaN(p) || isNaN(q) ? 0 : p * q);
   }, 0);
+
+  const totalQty = cart.reduce((sum, item) => sum + (parseInt(item.qty) || 0), 0);
 
   const hasEmptyPrice = cart.some((item) => item.price.trim() === "" || isNaN(parseFloat(item.price)));
 
@@ -275,7 +350,52 @@ export default function PaymentClient({ categories, customers }: Props) {
 
       {/* Payment dialog */}
       <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className={dialogStep === "receipt-preview" ? "max-w-md" : "max-w-sm"}>
+
+          {dialogStep === "cash-entry" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Cash Payment</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Total</span>
+                  <span className="font-bold text-base">RM {total.toFixed(2)}</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-gray-600">Cash Received (RM)</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={cashReceived}
+                    onChange={(e) => setCashReceived(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+
+                {cashReceived !== "" && !isNaN(parseFloat(cashReceived)) && (
+                  <div className="flex justify-between rounded-lg bg-gray-50 px-4 py-3">
+                    <span className="font-medium">Change</span>
+                    <span className="font-bold text-lg">
+                      RM {Math.max(0, parseFloat(cashReceived) - total).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                className="w-full"
+                disabled={!cashReceived || isNaN(parseFloat(cashReceived)) || parseFloat(cashReceived) < total}
+                onClick={handleCashConfirm}
+              >
+                Confirm
+              </Button>
+            </>
+          )}
           {dialogStep === "confirm" && (
             <>
               <DialogHeader>
@@ -345,9 +465,43 @@ export default function PaymentClient({ categories, customers }: Props) {
                 </p>
               </div>
               <Button className="w-full" onClick={handleSendReceipt}>
-                Send Receipt
+                View Receipt
               </Button>
             </div>
+          )}
+
+          {dialogStep === "receipt-preview" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Receipt Preview</DialogTitle>
+              </DialogHeader>
+
+              <ReceiptView
+                receiptNo={receiptNo}
+                date={receiptDate}
+                items={cart.map((item) => {
+                  const p = parseFloat(item.price);
+                  const q = parseFloat(item.qty);
+                  return {
+                    qty: isNaN(q) ? 0 : q,
+                    name: item.service.name,
+                    subtotal: isNaN(p) || isNaN(q) ? 0 : p * q,
+                  };
+                })}
+                paymentType={paymentType ?? ""}
+                total={total}
+                cashReceived={paymentType === "Cash" ? parseFloat(cashReceived) : null}
+                changeGiven={
+                  paymentType === "Cash"
+                    ? Math.max(0, parseFloat(cashReceived) - total)
+                    : null
+                }
+              />
+
+              <Button className="w-full" onClick={handleProceedToSend}>
+                Send Receipt
+              </Button>
+            </>
           )}
 
           {dialogStep === "receipt" && (

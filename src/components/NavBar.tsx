@@ -32,12 +32,6 @@ export default function NavBar() {
         Customer&apos;s Packages
       </Link>
       <Link
-        href="/packages/archive"
-        className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
-      >
-        Archive
-      </Link>
-      <Link
         href="/services"
         className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
       >
@@ -48,6 +42,18 @@ export default function NavBar() {
         className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
       >
         Payment
+      </Link>
+      <Link
+        href="/sales"
+        className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
+      >
+        Sales
+      </Link>
+      <Link
+        href="/packages/archive"
+        className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
+      >
+        Archive
       </Link>
       <div className="ml-auto">
         <LogoutButton />

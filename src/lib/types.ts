@@ -156,3 +156,40 @@ export type Service = {
   sort_order: number;
   created_at: string;
 };
+
+export type TransactionItem = {
+  service_name: string;
+  qty: number;
+  unit_price: number;
+  subtotal: number;
+};
+
+export type Transaction = {
+  id: string;
+  receipt_no: string;
+  transacted_at: string;       // ISO timestamptz
+  payment_type: string;
+  total: number;
+  cash_received: number | null;
+  change_given: number | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  items: TransactionItem[];    // stored as JSONB
+  is_voided: boolean;
+};
+
+export type ArchivedTransaction = {
+  id: string;
+  receipt_no: string;
+  transacted_at: string;
+  payment_type: string;
+  total: number;
+  cash_received: number | null;
+  change_given: number | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  items: TransactionItem[];
+  is_voided: boolean;
+  deleted_at: string;
+};

@@ -1,10 +1,11 @@
-import { getArchivedCustomers, getArchivedPackages } from "@/lib/actions";
+import { getArchivedCustomers, getArchivedPackages, getArchivedTransactions } from "@/lib/actions";
 import ArchiveSwitcher from "./ArchiveSwitcher";
 
 export default async function ArchiveHomePage() {
-  const [archivedPackages, archivedCustomers] = await Promise.all([
+  const [archivedPackages, archivedCustomers, archivedTransactions] = await Promise.all([
     getArchivedPackages(),
     getArchivedCustomers(),
+    getArchivedTransactions().catch(() => []),
   ]);
 
   return (
@@ -16,6 +17,7 @@ export default async function ArchiveHomePage() {
       <ArchiveSwitcher
         archivedPackages={archivedPackages}
         archivedCustomers={archivedCustomers}
+        archivedTransactions={archivedTransactions}
       />
       <p className="text-xs text-gray-500">
         Archived customer packages deleted from customer details can be viewed in each customer profile under the expandable "Archived Packages" section.
