@@ -21,7 +21,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   customerPackage: CustomerPackage | null;
-  onDeducted?: (serviceNames: string[]) => void;
+  onDeducted?: (serviceNames: string[], creditTopup?: number) => void;
   cartServiceNames?: string[];
   cartItems?: { service_name: string; price: string; qty: string }[];
 };
@@ -131,7 +131,7 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
         await deductPackageUse(customerPackage.id, null, notes.trim(), usedAtIso);
         toast.success(`1 use deducted. ${(customerPackage.remaining_uses ?? 1) - 1} remaining.`);
       }
-      onDeducted?.(deductedNames);
+      onDeducted?.(deductedNames, isCredit && cashTopup > 0 ? cashTopup : undefined);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to deduct use");

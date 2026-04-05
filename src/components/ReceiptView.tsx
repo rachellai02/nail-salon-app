@@ -101,20 +101,26 @@ export function ReceiptView({
         <span>RM {total.toFixed(2)}</span>
       </div>
 
-      {paymentType === "Package" ? (
+      {(paymentType === "Package" || paymentType.startsWith("Package +")) ? (
         <>
           <div className="flex justify-between">
-            <span>Package Deduction</span>
+            <span>{extraPaymentType === "Package" ? "Package Deduction 1" : "Package Deduction"}</span>
             <span>- RM {(total - (extraTotal ?? 0)).toFixed(2)}</span>
           </div>
+          {extraPaymentType === "Package" && extraTotal != null && (
+            <div className="flex justify-between">
+              <span>Package Deduction 2</span>
+              <span>- RM {extraTotal.toFixed(2)}</span>
+            </div>
+          )}
           <div className="border-t border-dashed border-gray-300" />
           <div className="flex justify-between font-bold">
             <span>Final Payment Amount</span>
-            <span>RM {(extraTotal ?? 0).toFixed(2)}</span>
+            <span>RM {extraPaymentType === "Package" ? "0.00" : (extraTotal ?? 0).toFixed(2)}</span>
           </div>
           <div className="flex justify-between">
             <span>Payment</span>
-            <span>{extraPaymentType ?? "Package (Fully Covered)"}</span>
+            <span>{extraPaymentType === "Package" ? "Package (Fully Covered)" : (extraPaymentType ?? "Package (Fully Covered)")}</span>
           </div>
           {extraPaymentType === "Cash" && extraCashReceived != null && (
             <>

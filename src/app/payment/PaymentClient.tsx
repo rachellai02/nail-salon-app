@@ -125,8 +125,12 @@ export default function PaymentClient({ categories, customers, packages }: Props
   const uid = useId();
   const counterRef = useRef(0);
   const lastDeductedNamesRef = useRef<string[] | null>(null);
+  const lastCreditTopupRef = useRef<number>(0);
   const packageSoldInFlowRef = useRef(false);
+  const isTopupDeductRef = useRef(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [extraCreditTopup, setExtraCreditTopup] = useState<number | null>(null);
+  const [extraTopupPackage, setExtraTopupPackage] = useState<CustomerPackage | null>(null);
 
   function addToCart(svc: Service) {
     const key = `${uid}-${counterRef.current++}-${svc.id}`;
@@ -168,6 +172,8 @@ export default function PaymentClient({ categories, customers, packages }: Props
     setCashReceived("");
     setDeductedServiceNames([]);
     setExtraCartItems([]);
+    setExtraCreditTopup(null);
+    setExtraTopupPackage(null);
     setExtraPaymentType(null);
     setExtraCashReceived("");
     packageSoldInFlowRef.current = false;
@@ -227,6 +233,34 @@ export default function PaymentClient({ categories, customers, packages }: Props
       } catch { /* keep existing */ }
     }
     if (names !== null) {
+      // If this was a topup deduction — go straight to success
+      if (isTopupDeductRef.current) {
+        isTopupDeductRef.current = false;
+        setReceiptNo(generateReceiptNo());
+        setReceiptDate(
+          new Date().toLocaleString("en-MY", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+          })
+        );
+        setDialogStep("success");
+        return;
+      }
+      // If credit top-up is required, go straight to extra-payment for the shortfall
+      const topup = lastCreditTopupRef.current;
+      lastCreditTopupRef.current = 0;
+      if (topup > 0) {
+        setExtraCreditTopup(topup);
+        setExtraCartItems([]);
+        setExtraPaymentType(null);
+        setExtraCashReceived("");
+        setDialogStep("extra-payment");
+        return;
+      }
       // Deduction was confirmed — skip back to package list and go straight to extra payment check
       const allDeducted = new Set([...deductedServiceNames, ...names]);
       const extras = cart.filter((item) => !allDeducted.has(item.service.name));
@@ -406,7 +440,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
         receipt_snapshot: {
           customerPackages: customerPackages.length > 0 ? customerPackages : undefined,
           extraPaymentType: extraPaymentType ?? undefined,
-          extraTotal: extraCartItems.length > 0 ? extraTotal : undefined,
+          extraTotal: (extraCartItems.length > 0 || extraCreditTopup !== null) ? extraTotal : undefined,
           extraCashReceived: extraPaymentType === "Cash" && extraCashReceived ? parseFloat(extraCashReceived) : undefined,
           extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
         },
@@ -446,7 +480,9 @@ export default function PaymentClient({ categories, customers, packages }: Props
     return sum + (isNaN(p) || isNaN(q) ? 0 : p * q);
   }, 0);
 
-  const extraTotal = extraCartItems.reduce((sum, item) => {
+  const extraTotal = extraCreditTopup !== null
+    ? extraCreditTopup
+    : extraCartItems.reduce((sum, item) => {
     const p = parseFloat(item.price);
     const q = parseFloat(item.qty);
     return sum + (isNaN(p) || isNaN(q) ? 0 : p * q);
@@ -464,6 +500,11 @@ export default function PaymentClient({ categories, customers, packages }: Props
         {categories.length === 0 && (
           <p className="text-gray-400 text-sm">No services configured yet.</p>
         )}
+        {!selectedCustomer && (
+          <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Select a customer before adding services.
+          </p>
+        )}
         {categories.map((cat) => (
           <div key={cat.id}>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
@@ -477,8 +518,9 @@ export default function PaymentClient({ categories, customers, packages }: Props
                   <button
                     key={svc.id}
                     type="button"
+                    disabled={!selectedCustomer}
                     onClick={() => addToCart(svc)}
-                    className="flex items-center justify-between gap-4 border rounded-lg px-4 py-2 text-sm hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left"
+                    className="flex items-center justify-between gap-4 border rounded-lg px-4 py-2 text-sm transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-gray-400 hover:enabled:bg-gray-50 active:enabled:bg-gray-100"
                   >
                     <span className="font-medium">{svc.name}</span>
                     <span className="text-gray-500 whitespace-nowrap">
@@ -610,7 +652,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
               <div className="flex items-center gap-3 text-xs text-gray-400 font-medium pb-1 border-b">
                 <span className="flex-1">Service</span>
                 <span className="w-13 text-center">Qty</span>
-                <span className="w-15 text-center">Unit Price</span>
+                <span className="w-17 text-center">Unit Price</span>
                 <span className="w-4"></span>
               </div>
               {cart.map((item) => (
@@ -634,7 +676,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
                     placeholder="Price"
                     value={item.price}
                     onChange={(e) => updatePrice(item.key, e.target.value)}
-                    className={`w-15 ${item.price.trim() === "" || isNaN(parseFloat(item.price)) ? "border-amber-400 focus-visible:border-amber-400" : ""}`}
+                    className={`w-17 ${item.price.trim() === "" || isNaN(parseFloat(item.price)) ? "border-amber-400 focus-visible:border-amber-400" : ""}`}
                   />
                   {/* Remove */}
                   <button
@@ -754,20 +796,27 @@ export default function PaymentClient({ categories, customers, packages }: Props
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-600">Payment type</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {PAYMENT_TYPES.map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setPaymentType(type)}
-                      className={`border rounded-lg px-3 py-2 text-sm text-left transition-colors ${
-                        paymentType === type
-                          ? "border-black bg-black text-white"
-                          : "hover:border-gray-400"
-                      }`}
-                    >
-                      {type}
-                    </button>
-                  ))}
+                  {PAYMENT_TYPES.map((type) => {
+                    const cartHasPackage = cart.some((item) => packages.find((p) => p.name === item.service.name && p.is_active));
+                    const disabled = type === "Package" && cartHasPackage;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => !disabled && setPaymentType(type)}
+                        className={`border rounded-lg px-3 py-2 text-sm text-left transition-colors ${
+                          disabled
+                            ? "opacity-40 cursor-not-allowed bg-gray-50 text-gray-400"
+                            : paymentType === type
+                            ? "border-black bg-black text-white"
+                            : "hover:border-gray-400"
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -834,29 +883,42 @@ export default function PaymentClient({ categories, customers, packages }: Props
                 <DialogTitle>Additional Payment Required</DialogTitle>
               </DialogHeader>
 
-              <p className="text-sm text-gray-500">
-                These services are not covered by the package and require an extra payment:
-              </p>
+              {extraCreditTopup !== null ? (
+                <p className="text-sm text-gray-500">
+                  The package credits are insufficient. A cash top-up is required for the shortfall:
+                </p>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  These services are not covered by the package and require an extra payment:
+                </p>
+              )}
 
-              <div className="text-sm max-h-40 overflow-y-auto">
-                <div className="flex gap-2 text-xs text-gray-400 font-medium pb-1 border-b mb-1">
-                  <span className="flex-1">Service</span>
-                  <span className="w-10 text-center">Qty</span>
-                  <span className="w-16 text-right">Price</span>
+              {extraCreditTopup !== null ? (
+                <div className="rounded-lg border bg-amber-50 px-4 py-3 flex justify-between text-sm">
+                  <span className="text-amber-800 font-medium">Credit shortfall</span>
+                  <span className="font-bold text-amber-900">RM {extraCreditTopup.toFixed(2)}</span>
                 </div>
-                {extraCartItems.map((item) => {
-                  const p = parseFloat(item.price);
-                  const q = parseFloat(item.qty);
-                  const sub = isNaN(p) || isNaN(q) ? 0 : p * q;
-                  return (
-                    <div key={item.key} className="flex gap-2 py-0.5">
-                      <span className="flex-1 truncate text-gray-700">{item.service.name}</span>
-                      <span className="w-10 text-center text-gray-500">{item.qty}</span>
-                      <span className="w-16 text-right font-medium">{sub.toFixed(2)}</span>
-                    </div>
-                  );
-                })}
-              </div>
+              ) : (
+                <div className="text-sm max-h-40 overflow-y-auto">
+                  <div className="flex gap-2 text-xs text-gray-400 font-medium pb-1 border-b mb-1">
+                    <span className="flex-1">Service</span>
+                    <span className="w-10 text-center">Qty</span>
+                    <span className="w-16 text-right">Price</span>
+                  </div>
+                  {extraCartItems.map((item) => {
+                    const p = parseFloat(item.price);
+                    const q = parseFloat(item.qty);
+                    const sub = isNaN(p) || isNaN(q) ? 0 : p * q;
+                    return (
+                      <div key={item.key} className="flex gap-2 py-0.5">
+                        <span className="flex-1 truncate text-gray-700">{item.service.name}</span>
+                        <span className="w-10 text-center text-gray-500">{item.qty}</span>
+                        <span className="w-16 text-right font-medium">{sub.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="flex justify-between items-center border-t pt-2 font-bold">
                 <span>Extra Total</span>
@@ -866,11 +928,17 @@ export default function PaymentClient({ categories, customers, packages }: Props
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-600">Payment type</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {PAYMENT_TYPES.filter((t) => t !== "Package").map((type) => (
+                  {PAYMENT_TYPES.filter((t) =>
+                    t !== "Package" ||
+                    (extraCreditTopup !== null &&
+                      customerPackages.some(
+                        (p) => p.package?.package_type === "credit" && (p.remaining_credits ?? 0) > 0
+                      ))
+                  ).map((type) => (
                     <button
                       key={type}
                       type="button"
-                      onClick={() => setExtraPaymentType(type)}
+                      onClick={() => { setExtraPaymentType(type); setExtraTopupPackage(null); }}
                       className={`border rounded-lg px-3 py-2 text-sm text-left transition-colors ${
                         extraPaymentType === type
                           ? "border-black bg-black text-white"
@@ -882,6 +950,31 @@ export default function PaymentClient({ categories, customers, packages }: Props
                   ))}
                 </div>
               </div>
+
+              {extraPaymentType === "Package" && extraCreditTopup !== null && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select package for top-up</p>
+                  {customerPackages
+                    .filter((p) => p.package?.package_type === "credit" && (p.remaining_credits ?? 0) > 0)
+                    .map((cp) => (
+                      <button
+                        key={cp.id}
+                        type="button"
+                        onClick={() => setExtraTopupPackage(cp)}
+                        className={`w-full flex items-center justify-between border rounded-lg px-3 py-2 text-sm transition-colors ${
+                          extraTopupPackage?.id === cp.id
+                            ? "border-black bg-black text-white"
+                            : "hover:border-gray-400"
+                        }`}
+                      >
+                        <span className="font-medium">{cp.package?.name}</span>
+                        <span className={`text-xs ${extraTopupPackage?.id === cp.id ? "text-gray-300" : "text-gray-400"}`}>
+                          {(cp.remaining_credits ?? 0).toFixed(2)} credits
+                        </span>
+                      </button>
+                    ))}
+                </div>
+              )}
 
               {extraPaymentType === "Cash" && (
                 <div className="space-y-2">
@@ -918,12 +1011,20 @@ export default function PaymentClient({ categories, customers, packages }: Props
                   className="flex-1"
                   disabled={
                     !extraPaymentType ||
+                    (extraPaymentType === "Package" && !extraTopupPackage) ||
                     (extraPaymentType === "Cash" &&
                       (!extraCashReceived ||
                         isNaN(parseFloat(extraCashReceived)) ||
                         parseFloat(extraCashReceived) < extraTotal))
                   }
-                  onClick={handleExtraPaymentConfirm}
+                  onClick={() => {
+                    if (extraPaymentType === "Package" && extraTopupPackage) {
+                      isTopupDeductRef.current = true;
+                      setDeductingPackage(extraTopupPackage);
+                    } else {
+                      handleExtraPaymentConfirm();
+                    }
+                  }}
                 >
                   Confirm Extra Payment
                 </Button>
@@ -982,7 +1083,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
                     : null
                 }
                 extraPaymentType={extraPaymentType ?? undefined}
-                extraTotal={extraCartItems.length > 0 ? extraTotal : undefined}
+                extraTotal={(extraCartItems.length > 0 || extraCreditTopup !== null) ? extraTotal : undefined}
                 extraCashReceived={
                   extraPaymentType === "Cash" && extraCashReceived
                     ? parseFloat(extraCashReceived)
@@ -1031,13 +1132,18 @@ export default function PaymentClient({ categories, customers, packages }: Props
       <DeductUseDialog
         open={deductingPackage !== null}
         onClose={() => void handleDeductClose()}
-        onDeducted={(names) => {
+        onDeducted={(names, topup) => {
         lastDeductedNamesRef.current = names;
+        lastCreditTopupRef.current = topup ?? 0;
         setDeductedServiceNames((prev) => [...prev, ...names]);
       }}
         customerPackage={deductingPackage}
-        cartServiceNames={cart.map((item) => item.service.name)}
-        cartItems={cart.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty }))}
+        cartServiceNames={isTopupDeductRef.current ? ["Package Top-Up"] : cart.map((item) => item.service.name)}
+        cartItems={
+          isTopupDeductRef.current
+            ? [{ service_name: "Package Top-Up", price: (extraCreditTopup ?? 0).toFixed(2), qty: "1" }]
+            : cart.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty }))
+        }
       />
 
       {/* Cancel payment confirmation */}
