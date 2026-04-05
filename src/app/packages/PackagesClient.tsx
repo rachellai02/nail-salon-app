@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Package } from "@/lib/types";
+import { Package, Service } from "@/lib/types";
 import { updatePackage, deletePackage } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,9 +18,10 @@ import { PackageFormDialog } from "@/components/PackageFormDialog";
 
 type Props = {
   initialPackages: Package[];
+  services: Service[];
 };
 
-export default function PackagesClient({ initialPackages }: Props) {
+export default function PackagesClient({ initialPackages, services }: Props) {
   const [packages, setPackages] = useState<Package[]>(initialPackages);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Package | null>(null);
@@ -160,6 +161,7 @@ export default function PackagesClient({ initialPackages }: Props) {
         open={dialogOpen}
         onClose={handleClose}
         editingPackage={editing}
+        services={services}
       />
     </div>
   );

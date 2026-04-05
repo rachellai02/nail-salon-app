@@ -164,6 +164,14 @@ export type TransactionItem = {
   subtotal: number;
 };
 
+export type ReceiptSnapshot = {
+  customerPackages?: CustomerPackage[];
+  extraPaymentType?: string;
+  extraTotal?: number;
+  extraCashReceived?: number | null;
+  extraChangeGiven?: number | null;
+};
+
 export type Transaction = {
   id: string;
   receipt_no: string;
@@ -177,6 +185,7 @@ export type Transaction = {
   customer_phone: string | null;
   items: TransactionItem[];    // stored as JSONB
   is_voided: boolean;
+  receipt_snapshot?: ReceiptSnapshot | null;
 };
 
 export type ArchivedTransaction = {

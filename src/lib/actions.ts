@@ -18,6 +18,7 @@ import {
   Transaction,
   TransactionItem,
   ArchivedTransaction,
+  ReceiptSnapshot,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -90,6 +91,23 @@ async function generateUniqueCustomerCode(): Promise<string> {
 // PACKAGE TYPES (e.g. "Manicure 5x")
 // ─────────────────────────────────────────────────────────────
 
+/** Finds or creates the reserved "Packages" service category and returns its id. */
+async function getOrCreatePackagesCategory(): Promise<string> {
+  const { data: existing } = await supabase
+    .from("service_categories")
+    .select("id")
+    .eq("name", "Packages")
+    .maybeSingle();
+  if (existing) return existing.id;
+  const { data: created, error } = await supabase
+    .from("service_categories")
+    .insert([{ name: "Packages", sort_order: 9999 }])
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return created.id;
+}
+
 export async function getPackages(): Promise<Package[]> {
   const { data, error } = await supabase
     .from("packages")
@@ -131,14 +149,25 @@ export async function createPackage(input: {
       }))
     );
     if (itemsError) throw new Error(itemsError.message);
+
+    // Sync to Services page
+    const catId = await getOrCreatePackagesCategory();
+    await supabase.from("services").insert([{ category_id: catId, name: input.name, price: input.price, package_id: pkg.id }]);
   } else {
     if (!input.total_credits || input.total_credits <= 0) throw new Error("Total credits must be greater than 0");
-    const { error } = await supabase
+    const { data: pkg, error } = await supabase
       .from("packages")
-      .insert([{ name: input.name, price: input.price, description: input.description, package_type: 'credit', total_uses: 0, total_credits: input.total_credits }]);
+      .insert([{ name: input.name, price: input.price, description: input.description, package_type: 'credit', total_uses: 0, total_credits: input.total_credits }])
+      .select()
+      .single();
     if (error) throw new Error(error.message);
+
+    // Sync to Services page
+    const catId = await getOrCreatePackagesCategory();
+    await supabase.from("services").insert([{ category_id: catId, name: input.name, price: input.price, package_id: pkg.id }]);
   }
   revalidatePath("/packages");
+  revalidatePath("/services");
 }
 
 export async function updatePackage(
@@ -173,7 +202,51 @@ export async function updatePackage(
     }
   }
 
+  // Sync name/price changes to the linked service in the Services page
+  if (input.name !== undefined || input.price !== undefined) {
+    const svcUpdate: Record<string, unknown> = {};
+    if (input.name !== undefined) svcUpdate.name = input.name;
+    if (input.price !== undefined) svcUpdate.price = input.price;
+    await supabase.from("services").update(svcUpdate).eq("package_id", id);
+  }
+
   revalidatePath("/packages");
+  revalidatePath("/services");
+}
+
+export async function syncPackagesToServices(): Promise<{ synced: number }> {
+  // Get all packages
+  const { data: packages, error: pkgError } = await supabase
+    .from("packages")
+    .select("id, name, price");
+  if (pkgError) throw new Error(pkgError.message);
+
+  // Get existing service rows that already have a package_id
+  const { data: existing, error: svcError } = await supabase
+    .from("services")
+    .select("package_id")
+    .not("package_id", "is", null);
+  if (svcError) throw new Error(svcError.message);
+
+  const alreadySynced = new Set((existing ?? []).map((s: { package_id: string }) => s.package_id));
+  const toSync = (packages ?? []).filter((p: { id: string }) => !alreadySynced.has(p.id));
+
+  if (toSync.length === 0) return { synced: 0 };
+
+  const catId = await getOrCreatePackagesCategory();
+  const { error: insertError } = await supabase.from("services").insert(
+    toSync.map((p: { id: string; name: string; price: number }) => ({
+      category_id: catId,
+      name: p.name,
+      price: p.price,
+      package_id: p.id,
+    }))
+  );
+  if (insertError) throw new Error(insertError.message);
+
+  revalidatePath("/services");
+  revalidatePath("/packages");
+  return { synced: toSync.length };
 }
 
 export async function deletePackage(id: string): Promise<void> {
@@ -287,7 +360,7 @@ export async function deletePackage(id: string): Promise<void> {
     throw new Error(archiveError.message);
   }
 
-  // Delete the package type
+  // Delete the package type (linked service auto-deletes via ON DELETE CASCADE on package_id)
   const { error } = await supabase.from("packages").delete().eq("id", id);
   if (error) throw new Error(error.message);
   
@@ -295,6 +368,7 @@ export async function deletePackage(id: string): Promise<void> {
   revalidatePath("/packages/customers");
   revalidatePath("/packages/archive");
   revalidatePath("/packages/archive/package-types");
+  revalidatePath("/services");
 }
 
 export async function getArchivedPackages(): Promise<ArchivedPackage[]> {
@@ -1571,6 +1645,62 @@ export async function deleteService(id: string): Promise<void> {
   revalidatePath("/services");
 }
 
+export async function syncPackagesToServicesCategory(): Promise<Service[]> {
+  // Find or create "Packages" category
+  const { data: existingCat } = await supabase
+    .from("service_categories")
+    .select("id")
+    .eq("name", "Packages")
+    .maybeSingle();
+
+  let catId: string;
+  if (existingCat) {
+    catId = existingCat.id;
+  } else {
+    const { data: created, error: createError } = await supabase
+      .from("service_categories")
+      .insert([{ name: "Packages", sort_order: 9999 }])
+      .select("id")
+      .single();
+    if (createError) throw new Error(createError.message);
+    catId = created.id;
+  }
+
+  // Clear existing services in the Packages category
+  await supabase.from("services").delete().eq("category_id", catId);
+
+  // Get all packages ordered by package_code ascending
+  const { data: packages, error: pkgError } = await supabase
+    .from("packages")
+    .select("name, price, package_code")
+    .order("package_code", { ascending: true });
+  if (pkgError) throw new Error(pkgError.message);
+
+  const pkgs = packages ?? [];
+  if (pkgs.length > 0) {
+    const { error: insertError } = await supabase.from("services").insert(
+      pkgs.map((p: { name: string; price: number; package_code: number }, idx: number) => ({
+        category_id: catId,
+        name: p.name,
+        price: p.price,
+        sort_order: idx,
+      }))
+    );
+    if (insertError) throw new Error(insertError.message);
+  }
+
+  // Return the fresh list of services in this category
+  const { data: updatedServices, error: fetchError } = await supabase
+    .from("services")
+    .select("*")
+    .eq("category_id", catId)
+    .order("sort_order", { ascending: true });
+  if (fetchError) throw new Error(fetchError.message);
+
+  revalidatePath("/services");
+  return (updatedServices ?? []) as Service[];
+}
+
 export async function reorderServiceCategories(orderedIds: string[]): Promise<void> {
   for (let i = 0; i < orderedIds.length; i++) {
     const { error } = await supabase
@@ -1607,6 +1737,7 @@ export async function createTransaction(input: {
   customer_name?: string | null;
   customer_phone?: string | null;
   items: TransactionItem[];
+  receipt_snapshot?: ReceiptSnapshot | null;
 }): Promise<Transaction> {
   const { data, error } = await supabase
     .from("sales_transactions")
@@ -1620,6 +1751,7 @@ export async function createTransaction(input: {
       customer_name: input.customer_name ?? null,
       customer_phone: input.customer_phone ?? null,
       items: input.items,
+      receipt_snapshot: input.receipt_snapshot ?? null,
     }])
     .select()
     .single();
@@ -1629,9 +1761,12 @@ export async function createTransaction(input: {
 }
 
 export async function getTransactionsByMonth(year: number, month: number): Promise<Transaction[]> {
-  // month is 1-based
-  const from = new Date(year, month - 1, 1).toISOString();
-  const to = new Date(year, month, 1).toISOString();
+  // month is 1-based; use +08:00 offset so boundaries match Malaysia local midnight
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const from = `${year}-${pad(month)}-01T00:00:00+08:00`;
+  const toYear = month === 12 ? year + 1 : year;
+  const toMonth = month === 12 ? 1 : month + 1;
+  const to = `${toYear}-${pad(toMonth)}-01T00:00:00+08:00`;
   const { data, error } = await supabase
     .from("sales_transactions")
     .select("*")
@@ -1708,6 +1843,7 @@ export async function getAllTransactionSummaries(): Promise<{ transacted_at: str
     .from("sales_transactions")
     .select("transacted_at, total")
     .eq("is_voided", false)
+    .not("payment_type", "ilike", "Package Sale%")
     .order("transacted_at", { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []) as { transacted_at: string; total: number }[];

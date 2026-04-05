@@ -128,7 +128,7 @@ export function CustomerFormDialog({ open, onClose, onSuccess, onCreated, editin
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); onClose(); } }}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
+      <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Customer" : "Register New Customer"}</DialogTitle>
         </DialogHeader>

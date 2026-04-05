@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Transaction } from "@/lib/types";
+import { Transaction, CustomerPackage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,21 +45,34 @@ function formatDate(iso: string) {
 export default function SalesClient({ transactions, year, month, summaryTransactions }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = searchParams.get("tab") === "details" ? "details" : "summary";
-  const initialDate = searchParams.get("date");
+  const activeTab = searchParams.get("tab") === "summary" ? "summary" : "details";
+  const todayStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
+  const initialDate = searchParams.get("date") ?? todayStr;
   const [selectedDate, setSelectedDate] = useState<string | null>(initialDate);
   const [receiptTx, setReceiptTx] = useState<Transaction | null>(null);
+  const [receiptPackages, setReceiptPackages] = useState<CustomerPackage[]>([]);
+
+  function openReceipt(tx: Transaction) {
+    setReceiptTx(tx);
+    if (tx.receipt_snapshot?.customerPackages) {
+      setReceiptPackages(tx.receipt_snapshot.customerPackages);
+    } else {
+      setReceiptPackages([]);
+    }
+  }
   const [voidTarget, setVoidTarget] = useState<Transaction | null>(null);
   const [voiding, setVoiding] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Group totals by date string "yyyy-MM-dd" (exclude voided)
+  const isPackageSale = (tx: Transaction) => tx.payment_type?.trim().toLowerCase().startsWith("package sale");
+
+  // Group totals by date string "yyyy-MM-dd" (exclude voided and package sales)
   const totalsByDate = useMemo<Record<string, number>>(() => {
     const map: Record<string, number> = {};
     for (const tx of transactions) {
-      if (tx.is_voided) continue;
-      const d = tx.transacted_at.slice(0, 10);
+      if (tx.is_voided || isPackageSale(tx)) continue;
+      const d = new Date(tx.transacted_at).toLocaleDateString("en-CA"); // YYYY-MM-DD in local tz
       map[d] = (map[d] ?? 0) + Number(tx.total);
     }
     return map;
@@ -68,7 +81,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
   // Transactions for the selected date
   const dayTransactions = useMemo<Transaction[]>(() => {
     if (!selectedDate) return [];
-    return transactions.filter((tx) => tx.transacted_at.slice(0, 10) === selectedDate);
+    return transactions.filter((tx) => new Date(tx.transacted_at).toLocaleDateString("en-CA") === selectedDate);
   }, [transactions, selectedDate]);
 
   // Build calendar grid
@@ -93,7 +106,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
-  const monthTotal = transactions.filter((t) => !t.is_voided).reduce((s, t) => s + Number(t.total), 0);
+  const monthTotal = transactions.filter((t) => !t.is_voided && !isPackageSale(t)).reduce((s, t) => s + Number(t.total), 0);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -165,7 +178,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
           {cells.map((day, idx) => {
             const ds = day ? dateStr(day) : null;
             const total = ds ? totalsByDate[ds] : undefined;
-            const isToday = ds === new Date().toISOString().slice(0, 10);
+            const isToday = ds === new Date().toLocaleDateString("en-CA");
             const isSelected = ds !== null && ds === selectedDate;
 
             return (
@@ -213,8 +226,12 @@ export default function SalesClient({ transactions, year, month, summaryTransact
               </h2>
               <p className="text-sm text-gray-500">
                 {(() => {
-                  const active = dayTransactions.filter((t) => !t.is_voided);
-                  return `${active.length} transaction${active.length !== 1 ? "s" : ""} · RM ${active.reduce((s, t) => s + Number(t.total), 0).toFixed(2)}`;
+                  const active = dayTransactions.filter((t) => !t.is_voided && !isPackageSale(t));
+                  const pkgCount = dayTransactions.filter((t) => isPackageSale(t)).length;
+                  return [
+                    `${active.length} service transaction${active.length !== 1 ? "s" : ""} · RM ${active.reduce((s, t) => s + Number(t.total), 0).toFixed(2)}`,
+                    pkgCount > 0 ? `· ${pkgCount} package sale${pkgCount !== 1 ? "s" : ""}` : "",
+                  ].filter(Boolean).join(" ");
                 })()}
               </p>
             </div>
@@ -230,75 +247,131 @@ export default function SalesClient({ transactions, year, month, summaryTransact
           {dayTransactions.length === 0 ? (
             <p className="text-gray-400 text-sm text-center py-8">No transactions on this day.</p>
           ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[600px]">
-              <thead>
-                <tr className="border-b text-xs text-gray-400 uppercase tracking-wide">
-                  <th className="px-5 py-2 text-left font-medium">Time</th>
-                  <th className="px-5 py-2 text-left font-medium">Receipt No</th>
-                  <th className="px-5 py-2 text-left font-medium">Customer</th>
-                  <th className="px-5 py-2 text-left font-medium">Payment</th>
-                  <th className="px-5 py-2 text-right font-medium">Total (RM)</th>
-                  <th className="px-5 py-2 text-right font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {dayTransactions.map((tx) => (
-                  <tr key={tx.id} className={`border-b last:border-0 ${tx.is_voided ? "opacity-50" : "hover:bg-gray-50"}`}>
-                    <td className="px-5 py-3 text-gray-500 whitespace-nowrap">
-                      {new Date(tx.transacted_at).toLocaleTimeString("en-MY", {
-                        hour: "2-digit", minute: "2-digit", hour12: true,
-                      })}
-                    </td>
-                    <td className="px-5 py-3 font-mono">
-                      {tx.receipt_no}
-                      {tx.is_voided && (
-                        <span className="ml-2 text-xs font-semibold text-red-500 uppercase">Void</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3">{tx.customer_name ?? <span className="text-gray-400">—</span>}</td>
-                    <td className="px-5 py-3">{tx.payment_type}</td>
-                    <td className={`px-5 py-3 text-right font-semibold ${tx.is_voided ? "line-through text-gray-400" : ""}`}>
-                      {Number(tx.total).toFixed(2)}
-                    </td>
-                    <td className="px-5 py-3 text-right">
-                      <div className="flex items-center justify-end gap-6">
-                        <button
-                          type="button"
-                          onClick={() => setReceiptTx(tx)}
-                          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
-                        >
-                          <Receipt size={14} /> Receipt
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setVoidTarget(tx)}
-                          className={`text-xs text-red-500 hover:text-red-700 transition-colors ${tx.is_voided ? "invisible" : ""}`}
-                        >
-                          Void
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(tx)}
-                          className="text-gray-400 hover:text-red-600 transition-colors"
-                          title="Delete transaction"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <div className="space-y-0">
+              {/* Services section */}
+              {(() => {
+                const rows = dayTransactions.filter((tx) => !isPackageSale(tx));
+                if (rows.length === 0) return null;
+                return (
+                  <div>
+                    <div className="px-5 py-2 bg-gray-50 border-b">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Services</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm min-w-[600px]">
+                        <thead>
+                          <tr className="border-b text-xs text-gray-400 uppercase tracking-wide">
+                            <th className="px-5 py-2 text-left font-medium">Time</th>
+                            <th className="px-5 py-2 text-left font-medium">Receipt No</th>
+                            <th className="px-5 py-2 text-left font-medium">Customer</th>
+                            <th className="px-5 py-2 text-left font-medium">Payment</th>
+                            <th className="px-5 py-2 text-right font-medium">Total (RM)</th>
+                            <th className="px-5 py-2 text-right font-medium"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((tx) => (
+                            <tr key={tx.id} className={`border-b last:border-0 ${tx.is_voided ? "opacity-50" : "hover:bg-gray-50"}`}>
+                              <td className="px-5 py-3 text-gray-500 whitespace-nowrap">
+                                {new Date(tx.transacted_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                              </td>
+                              <td className="px-5 py-3 font-mono">
+                                {tx.receipt_no}
+                                {tx.is_voided && <span className="ml-2 text-xs font-semibold text-red-500 uppercase">Void</span>}
+                              </td>
+                              <td className="px-5 py-3">{tx.customer_name ?? <span className="text-gray-400">—</span>}</td>
+                              <td className="px-5 py-3">{tx.payment_type}</td>
+                              <td className={`px-5 py-3 text-right font-semibold ${tx.is_voided ? "line-through text-gray-400" : ""}`}>
+                                {Number(tx.total).toFixed(2)}
+                              </td>
+                              <td className="px-5 py-3 text-right">
+                                <div className="flex items-center justify-end gap-6">
+                                  <button type="button" onClick={() => void openReceipt(tx)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors">
+                                    <Receipt size={14} /> Receipt
+                                  </button>
+                                  <button type="button" onClick={() => setVoidTarget(tx)} className={`text-xs text-red-500 hover:text-red-700 transition-colors ${tx.is_voided ? "invisible" : ""}`}>
+                                    Void
+                                  </button>
+                                  <button type="button" onClick={() => setDeleteTarget(tx)} className="text-gray-400 hover:text-red-600 transition-colors" title="Delete transaction">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Packages section */}
+              {(() => {
+                const rows = dayTransactions.filter((tx) => isPackageSale(tx));
+                if (rows.length === 0) return null;
+                return (
+                  <div className="border-t">
+                    <div className="px-5 py-2 bg-gray-50 border-b">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Packages</span>
+                      <span className="ml-2 text-xs text-gray-400">(not included in daily total)</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm min-w-[600px]">
+                        <thead>
+                          <tr className="border-b text-xs text-gray-400 uppercase tracking-wide">
+                            <th className="px-5 py-2 text-left font-medium">Time</th>
+                            <th className="px-5 py-2 text-left font-medium">Receipt No</th>
+                            <th className="px-5 py-2 text-left font-medium">Customer</th>
+                            <th className="px-5 py-2 text-left font-medium">Payment</th>
+                            <th className="px-5 py-2 text-right font-medium">Total (RM)</th>
+                            <th className="px-5 py-2 text-right font-medium"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((tx) => (
+                            <tr key={tx.id} className={`border-b last:border-0 ${tx.is_voided ? "opacity-50" : "hover:bg-gray-50"}`}>
+                              <td className="px-5 py-3 text-gray-500 whitespace-nowrap">
+                                {new Date(tx.transacted_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                              </td>
+                              <td className="px-5 py-3 font-mono">
+                                {tx.receipt_no}
+                                {tx.is_voided && <span className="ml-2 text-xs font-semibold text-red-500 uppercase">Void</span>}
+                              </td>
+                              <td className="px-5 py-3">{tx.customer_name ?? <span className="text-gray-400">—</span>}</td>
+                              <td className="px-5 py-3">{tx.payment_type?.replace(/^Package Sale\s*-?\s*/i, "") || tx.payment_type}</td>
+                              <td className={`px-5 py-3 text-right font-semibold ${tx.is_voided ? "line-through text-gray-400" : ""}`}>
+                                {Number(tx.total).toFixed(2)}
+                              </td>
+                              <td className="px-5 py-3 text-right">
+                                <div className="flex items-center justify-end gap-6">
+                                  <button type="button" onClick={() => void openReceipt(tx)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors">
+                                    <Receipt size={14} /> Receipt
+                                  </button>
+                                  <button type="button" onClick={() => setVoidTarget(tx)} className={`text-xs text-red-500 hover:text-red-700 transition-colors ${tx.is_voided ? "invisible" : ""}`}>
+                                    Void
+                                  </button>
+                                  <button type="button" onClick={() => setDeleteTarget(tx)} className="text-gray-400 hover:text-red-600 transition-colors" title="Delete transaction">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           )}
         </div>
       )}
 
       {/* Delete confirmation dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(v) => { if (!v && !deleting) setDeleteTarget(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>Delete Transaction</DialogTitle>
           </DialogHeader>
@@ -336,7 +409,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
 
       {/* Delete confirmation dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(v) => { if (!v && !deleting) setDeleteTarget(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>Delete Transaction</DialogTitle>
           </DialogHeader>
@@ -374,7 +447,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
 
       {/* Void confirmation dialog */}
       <Dialog open={!!voidTarget} onOpenChange={(v) => { if (!v && !voiding) setVoidTarget(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>Void Transaction</DialogTitle>
           </DialogHeader>
@@ -407,8 +480,8 @@ export default function SalesClient({ transactions, year, month, summaryTransact
       </Dialog>
 
       {/* Receipt preview dialog */}
-      <Dialog open={!!receiptTx} onOpenChange={(v) => { if (!v) setReceiptTx(null); }}>
-        <DialogContent className="max-w-md">
+      <Dialog open={!!receiptTx} onOpenChange={(v) => { if (!v) { setReceiptTx(null); setReceiptPackages([]); } }}>
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>{receiptTx?.is_voided ? "Receipt (Voided)" : "Receipt"}</DialogTitle>
           </DialogHeader>
@@ -432,6 +505,11 @@ export default function SalesClient({ transactions, year, month, summaryTransact
                 cashReceived={receiptTx.cash_received}
                 changeGiven={receiptTx.change_given}
                 isVoided={receiptTx.is_voided}
+                customerPackages={receiptPackages.length > 0 ? receiptPackages : undefined}
+                extraPaymentType={receiptTx.receipt_snapshot?.extraPaymentType}
+                extraTotal={receiptTx.receipt_snapshot?.extraTotal}
+                extraCashReceived={receiptTx.receipt_snapshot?.extraCashReceived}
+                extraChangeGiven={receiptTx.receipt_snapshot?.extraChangeGiven}
               />
               {receiptTx.is_voided && (
                 <Button

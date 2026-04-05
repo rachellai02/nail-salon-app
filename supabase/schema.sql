@@ -434,3 +434,7 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 --   is_voided      BOOLEAN NOT NULL DEFAULT FALSE,
 --   deleted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 -- );
+
+-- Step N+3: Add receipt_snapshot column to store the exact receipt state at time of payment
+ALTER TABLE sales_transactions ADD COLUMN IF NOT EXISTS receipt_snapshot JSONB;
+ALTER TABLE archived_transactions ADD COLUMN IF NOT EXISTS receipt_snapshot JSONB;

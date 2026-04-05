@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomerPackage } from "@/lib/types";
+
 const SHOP_NAME = "PRESTIGE BY CHUSEN";
 const SHOP_REG = "Chusen Beauty 202603063451 (003831067-D)";
 const SHOP_TEL = "04-6588998 / 012-6988477";
@@ -20,6 +22,11 @@ type ReceiptViewProps = {
   cashReceived?: number | null;
   changeGiven?: number | null;
   isVoided?: boolean;
+  customerPackages?: CustomerPackage[];
+  extraPaymentType?: string;
+  extraTotal?: number;
+  extraCashReceived?: number | null;
+  extraChangeGiven?: number | null;
 };
 
 export function ReceiptView({
@@ -31,13 +38,18 @@ export function ReceiptView({
   cashReceived,
   changeGiven,
   isVoided = false,
+  customerPackages,
+  extraPaymentType,
+  extraTotal,
+  extraCashReceived,
+  extraChangeGiven,
 }: ReceiptViewProps) {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
 
   return (
     <div className="relative">
-      <div className="font-mono text-xs border rounded-lg p-4 bg-white space-y-2 max-h-[60vh] overflow-y-auto">
+      <div className="font-mono text-xs border rounded-lg p-10 bg-white space-y-2 max-h-[60vh] overflow-y-auto">
       {/* Shop header */}
       <div className="text-center space-y-0.5">
         <p className="font-bold text-sm tracking-wide">{SHOP_NAME}</p>
@@ -47,15 +59,15 @@ export function ReceiptView({
         <p>{addrParts.slice(2).join(",").trim()}</p>
       </div>
 
-      <p className="text-center text-gray-300">- - - - - - - - - - - - - - - - -</p>
+      <div className="border-t border-dashed border-gray-300 p-2" />
 
-      <div className="space-y-0.5">
+      <div className="space-y-0.5 pb-2">
         <p>Receipt No: {receiptNo}</p>
         <p>Date: {date}</p>
         <p>Transaction By: xxx</p>
       </div>
 
-      <p className="text-center text-gray-300">- - - - - - - - - - - - - - - - -</p>
+      <div className="border-t border-dashed border-gray-300" />
 
       {/* Items table */}
       <div className="flex gap-1 font-bold">
@@ -89,25 +101,113 @@ export function ReceiptView({
         <span>RM {total.toFixed(2)}</span>
       </div>
 
-      <div className="flex justify-between">
-        <span>Payment</span>
-        <span>{paymentType}</span>
-      </div>
-
-      {paymentType === "Cash" && cashReceived != null && (
+      {paymentType === "Package" ? (
         <>
           <div className="flex justify-between">
-            <span>Cash Received</span>
-            <span>RM {Number(cashReceived).toFixed(2)}</span>
+            <span>Package Deduction</span>
+            <span>- RM {(total - (extraTotal ?? 0)).toFixed(2)}</span>
+          </div>
+          <div className="border-t border-dashed border-gray-300" />
+          <div className="flex justify-between font-bold">
+            <span>Final Payment Amount</span>
+            <span>RM {(extraTotal ?? 0).toFixed(2)}</span>
           </div>
           <div className="flex justify-between">
-            <span>Change</span>
-            <span>RM {Number(changeGiven ?? 0).toFixed(2)}</span>
+            <span>Payment</span>
+            <span>{extraPaymentType ?? "Package (Fully Covered)"}</span>
           </div>
+          {extraPaymentType === "Cash" && extraCashReceived != null && (
+            <>
+              <div className="flex justify-between">
+                <span>Cash Received</span>
+                <span>RM {Number(extraCashReceived).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Change</span>
+                <span>RM {Number(extraChangeGiven ?? 0).toFixed(2)}</span>
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="flex justify-between">
+            <span>Payment</span>
+            <span>{paymentType}</span>
+          </div>
+
+          {paymentType === "Cash" && cashReceived != null && (
+            <>
+              <div className="flex justify-between">
+                <span>Cash Received</span>
+                <span>RM {Number(cashReceived).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Change</span>
+                <span>RM {Number(changeGiven ?? 0).toFixed(2)}</span>
+              </div>
+            </>
+          )}
+
+          {extraPaymentType && extraTotal != null && (
+            <>
+              <div className="flex justify-between">
+                <span>Extra Payment</span>
+                <span>{extraPaymentType}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Extra Amount</span>
+                <span>RM {extraTotal.toFixed(2)}</span>
+              </div>
+              {extraPaymentType === "Cash" && extraCashReceived != null && (
+                <>
+                  <div className="flex justify-between">
+                    <span>Cash Received</span>
+                    <span>RM {Number(extraCashReceived).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Change</span>
+                    <span>RM {Number(extraChangeGiven ?? 0).toFixed(2)}</span>
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </>
       )}
 
-      <p className="text-center text-gray-300">- - - - - - - - - - - - - - - - -</p>
+      {customerPackages && customerPackages.length > 0 && (
+        <>
+          <br></br>
+          <div className="border-t border-dashed border-gray-300" />
+          <br></br>
+          <p className="font-bold">Customer Name: {customerPackages[0]?.customer?.name ?? "N/A"}</p>
+          <p className="font-bold">Phone Number: {customerPackages[0]?.customer?.contact_number ?? "N/A"}</p>
+          <br></br>
+          <p className="font-bold">Active Packages:</p>
+          {customerPackages.map((cp) => (
+            <div key={cp.id} className="space-y-0.5 mt-1">
+              <p className="font-semibold">{cp.package?.name ?? "Package"}</p>
+              {cp.package?.package_type === "credit" ? (
+                <p className="pl-2">Credits: {(cp.remaining_credits ?? 0)} remaining</p>
+              ) : (
+                <div className="pl-2 space-y-0.5">
+                  {(cp.items ?? []).map((item) => (
+                    <div key={item.id} className="flex justify-between">
+                      <span>{item.service_name}</span>
+                      <span>{item.remaining_uses}/{item.total_uses} left</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+
+      <br></br>
+      <div className="border-t border-dashed border-gray-300" />
+      <br></br>
       <p className="text-center">Thank you and have a nice day.</p>
       <p className="text-center">Hope to see you again soon.</p>
     </div>

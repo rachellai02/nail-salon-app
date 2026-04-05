@@ -11,6 +11,7 @@ import {
   deleteService,
   reorderServiceCategories,
   reorderServices,
+  syncPackagesToServicesCategory,
 } from "@/lib/actions";
 import { ChevronUp, ChevronDown } from "lucide-react";
 import { ServiceCategory, Service } from "@/lib/types";
@@ -60,6 +61,26 @@ export default function ServicesClient({ initialCategories }: Props) {
     { type: "category"; item: ServiceCategory } | { type: "service"; item: Service } | null
   >(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Sync packages state
+  const [syncing, setSyncing] = useState(false);
+
+  async function handleSyncPackages(catId: string) {
+    setSyncing(true);
+    try {
+      const updatedServices = await syncPackagesToServicesCategory();
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.id === catId ? { ...c, services: updatedServices } : c
+        )
+      );
+      toast.success("Synced packages to Services page.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   // Reorder mode
   const [reorderMode, setReorderMode] = useState(false);
@@ -278,6 +299,11 @@ export default function ServicesClient({ initialCategories }: Props) {
             </div>
             {!reorderMode && (
               <div className="flex gap-2">
+                {cat.name === "Packages" && (
+                  <Button size="sm" variant="outline" onClick={() => handleSyncPackages(cat.id)} disabled={syncing}>
+                    {syncing ? "Syncing…" : "Sync from Package Types"}
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={() => openCreateSvc(cat.id)}>
                   + Add Service
                 </Button>
@@ -375,7 +401,7 @@ export default function ServicesClient({ initialCategories }: Props) {
 
       {/* Category dialog */}
       <Dialog open={catDialogOpen} onOpenChange={(v) => { if (!v) setCatDialogOpen(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>{editingCat ? "Rename Category" : "Add Category"}</DialogTitle>
             <DialogDescription>Enter a name for the service category.</DialogDescription>
@@ -401,7 +427,7 @@ export default function ServicesClient({ initialCategories }: Props) {
 
       {/* Service dialog */}
       <Dialog open={svcDialogOpen} onOpenChange={(v) => { if (!v) setSvcDialogOpen(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>{editingSvc ? "Edit Service" : "Add Service"}</DialogTitle>
             <DialogDescription>
@@ -442,7 +468,7 @@ export default function ServicesClient({ initialCategories }: Props) {
 
       {/* Delete confirm dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>Confirm Delete</DialogTitle>
             <DialogDescription>

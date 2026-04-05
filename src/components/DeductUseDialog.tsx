@@ -21,9 +21,12 @@ type Props = {
   open: boolean;
   onClose: () => void;
   customerPackage: CustomerPackage | null;
+  onDeducted?: (serviceNames: string[]) => void;
+  cartServiceNames?: string[];
+  cartItems?: { service_name: string; price: string; qty: string }[];
 };
 
-export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
+export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, cartServiceNames, cartItems }: Props) {
   const [notes, setNotes] = useState("");
   const [usedDateTime, setUsedDateTime] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,8 +45,22 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
       .slice(0, 16);
     setUsedDateTime(local);
     setSelectedItemIds(new Set());
-    setCreditServices([{ service_name: "", price: "" }]);
     setNotes("");
+    // Pre-populate credit services from cart when available
+    const pkg = customerPackage;
+    const isCredit_ = (pkg?.package?.package_type ?? "services") === "credit";
+    if (isCredit_ && cartItems && cartItems.length > 0) {
+      const expanded = cartItems.flatMap((item) => {
+        const qty = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+        return Array.from({ length: qty }, () => ({
+          service_name: item.service_name,
+          price: item.price,
+        }));
+      });
+      setCreditServices(expanded);
+    } else {
+      setCreditServices([{ service_name: "", price: "" }]);
+    }
   }, [open]);
 
   function toggleItem(id: string) {
@@ -69,7 +86,17 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
   const remaining = customerPackage?.remaining_credits ?? 0;
   const totalCredits = creditServices.reduce((sum, s) => sum + (parseFloat(s.price) || 0), 0);
   const cashTopup = Math.max(0, totalCredits - remaining);
-  const canConfirm = !loading && !!notes.trim() && (
+
+  // Validate selected items against cart
+  const invalidSelectedItems = hasItems && cartServiceNames
+    ? items.filter((item) =>
+        selectedItemIds.has(item.id) &&
+        !cartServiceNames.some((n) => n.trim().toLowerCase() === item.service_name.trim().toLowerCase())
+      )
+    : [];
+  const hasInvalidSelection = invalidSelectedItems.length > 0;
+
+  const canConfirm = !loading && !!notes.trim() && !hasInvalidSelection && (
     isCredit
       ? creditServices.length > 0 &&
         creditServices.every((s) => s.service_name.trim() !== "" && parseFloat(s.price) > 0) &&
@@ -84,25 +111,27 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
     setLoading(true);
     try {
       const usedAtIso = usedDateTime ? new Date(usedDateTime).toISOString() : undefined;
+      let deductedNames: string[] = [];
       if (isCredit) {
         const services = creditServices.map((s) => ({ service_name: s.service_name.trim(), price: parseFloat(s.price) }));
         await deductPackageUse(customerPackage.id, null, notes.trim(), usedAtIso, undefined, services);
         const newRemaining = Math.max(0, (customerPackage.remaining_credits ?? 0) - totalCredits);
         const topupMsg = cashTopup > 0 ? ` + ${cashTopup} cash top-up` : "";
         toast.success(`${totalCredits} deducted ${topupMsg}. ${newRemaining} credits remaining.`);
+        deductedNames = creditServices.map((s) => s.service_name.trim()).filter(Boolean);
       } else if (hasItems) {
         for (const itemId of selectedItemIds) {
           await deductPackageUse(customerPackage.id, itemId, notes.trim(), usedAtIso);
         }
-        const deductedNames = items
+        deductedNames = items
           .filter((i) => selectedItemIds.has(i.id))
-          .map((i) => i.service_name)
-          .join(", ");
-        toast.success(`Deducted: ${deductedNames}`);
+          .map((i) => i.service_name);
+        toast.success(`Deducted: ${deductedNames.join(", ")}`);
       } else {
         await deductPackageUse(customerPackage.id, null, notes.trim(), usedAtIso);
         toast.success(`1 use deducted. ${(customerPackage.remaining_uses ?? 1) - 1} remaining.`);
       }
+      onDeducted?.(deductedNames);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to deduct use");
@@ -113,7 +142,7 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
         <DialogHeader>
           <DialogTitle>Deduct Uses</DialogTitle>
           <DialogDescription>
@@ -140,6 +169,7 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
                       value={svc.service_name}
                       onChange={(e) => updateCreditService(idx, "service_name", e.target.value)}
                       className="flex-1"
+                      readOnly={!!cartItems && cartItems.length > 0}
                     />
                     <Input
                       type="number"
@@ -149,8 +179,9 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
                       value={svc.price}
                       onChange={(e) => updateCreditService(idx, "price", e.target.value)}
                       className="w-28"
+                      readOnly={!!cartItems && cartItems.length > 0}
                     />
-                    {creditServices.length > 1 && (
+                    {creditServices.length > 1 && !(cartItems && cartItems.length > 0) && (
                       <button
                         type="button"
                         onClick={() => removeCreditService(idx)}
@@ -162,13 +193,15 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
                   </div>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={addCreditService}
-                className="text-sm text-blue-600 hover:underline mt-1"
-              >
-                + Add another service
-              </button>
+              {!(cartItems && cartItems.length > 0) && (
+                <button
+                  type="button"
+                  onClick={addCreditService}
+                  className="text-sm text-blue-600 hover:underline mt-1"
+                >
+                  + Add another service
+                </button>
+              )}
             </div>
             {totalCredits > 0 && (
               <div className="space-y-1 pt-2 border-t text-sm">
@@ -203,6 +236,8 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
               {items.map((item) => {
                 const exhausted = item.remaining_uses <= 0;
                 const selected = selectedItemIds.has(item.id);
+                const notInCart = cartServiceNames != null &&
+                  !cartServiceNames.some((n) => n.trim().toLowerCase() === item.service_name.trim().toLowerCase());
                 return (
                   <button
                     key={item.id}
@@ -212,11 +247,16 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
                     className={[
                       "w-full flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors",
                       exhausted ? "opacity-40 cursor-not-allowed bg-gray-50" : "cursor-pointer hover:border-gray-400",
-                      selected ? "border-gray-900 bg-gray-50 font-medium" : "border-gray-200",
+                      selected && hasInvalidSelection && notInCart
+                        ? "border-red-500 bg-red-50"
+                        : selected
+                        ? "border-gray-900 bg-gray-50 font-medium"
+                        : "border-gray-200",
                     ].join(" ")}
                   >
                     <span>{item.service_name}</span>
                     <div className="flex items-center gap-2">
+                      {notInCart && <span className="text-xs text-amber-600 font-medium">not in cart</span>}
                       {selected && <span className="text-xs font-semibold text-gray-900">✓</span>}
                       <Badge
                         variant={
@@ -230,6 +270,11 @@ export function DeductUseDialog({ open, onClose, customerPackage }: Props) {
                 );
               })}
             </div>
+            {hasInvalidSelection && (
+              <p className="text-sm text-red-600">
+                The following services are not in the current cart: <strong>{invalidSelectedItems.map((i) => i.service_name).join(", ")}</strong>. Please deselect them before confirming.
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-gray-600">

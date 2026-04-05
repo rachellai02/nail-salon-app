@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Trash2, Plus } from "lucide-react";
 import { createPackage, updatePackage } from "@/lib/actions";
-import { Package } from "@/lib/types";
+import { Package, Service } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const schema = z.object({
   name: z.string().min(1, "Package name is required"),
@@ -32,22 +39,27 @@ type Props = {
   open: boolean;
   onClose: () => void;
   editingPackage?: Package | null;
+  services?: Service[];
 };
 
-export function PackageFormDialog({ open, onClose, editingPackage }: Props) {
+export function PackageFormDialog({ open, onClose, editingPackage, services = [] }: Props) {
   const [loading, setLoading] = useState(false);
-  const [packageType, setPackageType] = useState<'services' | 'credit'>(
-    editingPackage?.package_type ?? 'services'
-  );
-  const [totalCredits, setTotalCredits] = useState<number>(
-    editingPackage?.total_credits ?? 100
-  );
-  const [items, setItems] = useState<ServiceItem[]>(() => {
-    if (editingPackage?.items && editingPackage.items.length > 0) {
-      return editingPackage.items.map((i) => ({ service_name: i.service_name, total_uses: i.total_uses }));
+  const [packageType, setPackageType] = useState<'services' | 'credit'>('services');
+  const [totalCredits, setTotalCredits] = useState<number>(100);
+  const [items, setItems] = useState<ServiceItem[]>([{ service_name: "", total_uses: 1 }]);
+
+  // Sync state whenever the dialog opens or switches to a different package
+  useEffect(() => {
+    if (open) {
+      setPackageType(editingPackage?.package_type ?? 'services');
+      setTotalCredits(editingPackage?.total_credits ?? 100);
+      setItems(
+        editingPackage?.items && editingPackage.items.length > 0
+          ? editingPackage.items.map((i) => ({ service_name: i.service_name, total_uses: i.total_uses }))
+          : [{ service_name: "", total_uses: 1 }]
+      );
     }
-    return [{ service_name: "", total_uses: 1 }];
-  });
+  }, [open, editingPackage]);
 
   const {
     register,
@@ -150,7 +162,7 @@ export function PackageFormDialog({ open, onClose, editingPackage }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
-      <DialogContent className="w-[min(560px,calc(100dvw-2rem))] max-w-none overflow-x-hidden">
+      <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Package" : "Create New Package"}</DialogTitle>
         </DialogHeader>
@@ -243,12 +255,30 @@ export function PackageFormDialog({ open, onClose, editingPackage }: Props) {
               <div className="space-y-2">
                 {items.map((item, idx) => (
                   <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      placeholder="Service name (e.g. Gel Manicure)"
-                      value={item.service_name}
-                      onChange={(e) => updateItem(idx, "service_name", e.target.value)}
-                      className="flex-1"
-                    />
+                    {services.length > 0 ? (
+                      <Select
+                        value={item.service_name}
+                        onValueChange={(val) => updateItem(idx, "service_name", val ?? "")}
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Select a service…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {services.map((svc) => (
+                            <SelectItem key={svc.id} value={svc.name}>
+                              {svc.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        placeholder="Service name (e.g. Gel Manicure)"
+                        value={item.service_name}
+                        onChange={(e) => updateItem(idx, "service_name", e.target.value)}
+                        className="flex-1"
+                      />
+                    )}
                     <Input
                       type="number"
                       min={1}

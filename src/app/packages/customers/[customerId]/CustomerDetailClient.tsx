@@ -577,7 +577,7 @@ export default function CustomerDetailClient({
         customerPackage={deductTarget}
       />
       <Dialog open={!!historyTarget} onOpenChange={(v) => { if (!v) handleCloseHistory(); }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none">
           <DialogHeader>
             <DialogTitle>Use History</DialogTitle>
             <DialogDescription className="whitespace-normal break-all">

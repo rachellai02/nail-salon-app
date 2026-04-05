@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { createCustomerPackage } from "@/lib/actions";
+import { createCustomerPackage, createTransaction } from "@/lib/actions";
 import { Package, Customer } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,21 @@ import {
 } from "@/components/ui/select";
 import { CustomerFormDialog } from "@/components/CustomerFormDialog";
 
+const PAYMENT_TYPES = ["Cash", "Card", "Bank Transfer / QR", "E-Wallet"] as const;
+type PaymentType = (typeof PAYMENT_TYPES)[number];
+
+function generateReceiptNo(): string {
+  try {
+    const stored = localStorage.getItem("receipt_counter");
+    const current = stored ? parseInt(stored, 10) : 11111110;
+    const next = current + 1;
+    localStorage.setItem("receipt_counter", String(next));
+    return String(next);
+  } catch {
+    return "11111111";
+  }
+}
+
 const schema = z.object({
   package_id: z.string().min(1, "Please select a package"),
   customer_id: z.string().min(1, "Please select a customer"),
@@ -39,18 +54,22 @@ type Props = {
   packages: Package[];
   customers: Customer[];
   defaultCustomerId?: string;
+  defaultPackageId?: string;
+  defaultPaymentType?: string;
+  skipTransaction?: boolean;
 };
 
 const wrappingSelectTriggerClass =
   "w-full !h-auto min-h-[40px] py-2 !items-start !whitespace-normal data-[size=default]:h-auto [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:items-start [&_[data-slot=select-value]]:min-w-0";
 const wrappingSelectValueClass = "!line-clamp-none !whitespace-normal !items-start !min-w-0";
 
-export function SellPackageDialog({ open, onClose, packages, customers, defaultCustomerId }: Props) {
+export function SellPackageDialog({ open, onClose, packages, customers, defaultCustomerId, defaultPackageId, defaultPaymentType, skipTransaction }: Props) {
   const [loading, setLoading] = useState(false);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
   const [selectedExpiryYears, setSelectedExpiryYears] = useState<string>("");
+  const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | "">("");
   const activePackages = packages.filter((p) => p.is_active);
   
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
@@ -73,6 +92,22 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
     }
   }, [open, defaultCustomerId, setValue]);
 
+  // Set default package when dialog opens
+  useEffect(() => {
+    if (open && defaultPackageId) {
+      setSelectedPackageId(defaultPackageId);
+      setValue("package_id", defaultPackageId);
+    }
+  }, [open, defaultPackageId, setValue]);
+
+  // Set default payment type when dialog opens
+  useEffect(() => {
+    if (open && defaultPaymentType) {
+      const match = PAYMENT_TYPES.find((t) => t.toLowerCase() === defaultPaymentType.toLowerCase());
+      if (match) setSelectedPaymentType(match);
+    }
+  }, [open, defaultPaymentType]);
+
   async function onSubmit(data: FormValues) {
     setLoading(true);
     try {
@@ -88,11 +123,37 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
         customer_id: data.customer_id,
         expiry_date,
       });
+
+      // Record a sales transaction for this package sale (not counted in daily totals)
+      // Skipped when called from the payment flow — the main receipt already records it
+      if (!skipTransaction) {
+        const customer = customers.find((c) => c.id === data.customer_id);
+        const pkg = activePackages.find((p) => p.id === data.package_id);
+        if (pkg) {
+          const receiptNo = generateReceiptNo();
+          await createTransaction({
+            receipt_no: receiptNo,
+            payment_type: `Package Sale - ${selectedPaymentType || "Cash"}`,
+            total: pkg.price ?? 0,
+            customer_id: data.customer_id,
+            customer_name: customer?.name ?? null,
+            customer_phone: customer?.contact_number ?? null,
+            items: [{
+              service_name: pkg.name,
+              qty: 1,
+              unit_price: pkg.price ?? 0,
+              subtotal: pkg.price ?? 0,
+            }],
+          });
+        }
+      }
+
       toast.success("Package sold and recorded successfully!");
       reset();
       setSelectedCustomerId("");
       setSelectedPackageId("");
       setSelectedExpiryYears("");
+      setSelectedPaymentType("");
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
@@ -109,8 +170,8 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); onClose(); } }}>
-        <DialogContent className="sm:max-w-lg px-5">
+      <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); setSelectedPaymentType(""); onClose(); } }}>
+        <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none px-5">
           <DialogHeader>
             <DialogTitle>Sell Package to Customer</DialogTitle>
           </DialogHeader>
@@ -210,11 +271,32 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
               </Select>
               {errors.expiry_years && <p className="text-xs text-red-500">{errors.expiry_years.message}</p>}
             </div>
+            {!defaultPaymentType && (
+            <div className="space-y-1">
+              <Label>Payment Type <span className="text-red-500">*</span></Label>
+              <div className="grid grid-cols-2 gap-2">
+                {PAYMENT_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setSelectedPaymentType(type)}
+                    className={`border rounded-lg px-3 py-2 text-sm text-left transition-colors ${
+                      selectedPaymentType === type
+                        ? "border-black bg-black text-white"
+                        : "hover:border-gray-400"
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
             <DialogFooter className="pt-4 pb-4 pl-0 pr-5 sm:pl-0 sm:pr-5">
-              <Button type="button" variant="outline" onClick={() => { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); onClose(); }}>
+              <Button type="button" variant="outline" onClick={() => { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); setSelectedPaymentType(""); onClose(); }}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={loading}>
+              <Button type="submit" disabled={loading || !selectedPaymentType}>
                 {loading ? "Saving..." : "Confirm Sale"}
               </Button>
             </DialogFooter>

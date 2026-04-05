@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useId, useRef } from "react";
-import { ServiceCategory, Service, Customer } from "@/lib/types";
+import { ServiceCategory, Service, Customer, CustomerPackage, Package } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,10 +9,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { CustomerFormDialog } from "@/components/CustomerFormDialog";
 import { ReceiptView } from "@/components/ReceiptView";
-import { createTransaction } from "@/lib/actions";
+import { SellPackageDialog } from "@/components/SellPackageDialog";
+import { DeductUseDialog } from "@/components/DeductUseDialog";
+import { createTransaction, getPackagesByCustomerId } from "@/lib/actions";
 import { X, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,16 +36,18 @@ const PAYMENT_TYPES: PaymentType[] = [
   "Package",
 ];
 
-type DialogStep = "confirm" | "cash-entry" | "success" | "receipt-preview" | "receipt";
+type DialogStep = "confirm" | "cash-entry" | "success" | "receipt-preview" | "package-deduct" | "extra-payment";
 
 type Props = {
   categories: ServiceCategory[];
   customers: Customer[];
+  packages: Package[];
 };
 
 const CART_STORAGE_KEY = "payment_cart";
+const CUSTOMER_STORAGE_KEY = "payment_customer";
 
-export default function PaymentClient({ categories, customers }: Props) {
+export default function PaymentClient({ categories, customers, packages }: Props) {
   const [cart, setCart] = useState<CartItem[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -61,15 +66,67 @@ export default function PaymentClient({ categories, customers }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogStep, setDialogStep] = useState<DialogStep>("confirm");
   const [paymentType, setPaymentType] = useState<PaymentType | null>(null);
-  // receipt step state
+  // Customer — selected in the main panel before payment
   const [customerQuery, setCustomerQuery] = useState("");
-  const [receiptCustomer, setReceiptCustomer] = useState<Customer | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = sessionStorage.getItem(CUSTOMER_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as Customer) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [customerPackages, setCustomerPackages] = useState<CustomerPackage[]>([]);
+  const [loadingPackages, setLoadingPackages] = useState(false);
+
+  // Restore customer packages when a customer is already selected on mount
+  useEffect(() => {
+    if (selectedCustomer) {
+      setLoadingPackages(true);
+      getPackagesByCustomerId(selectedCustomer.id)
+        .then((pkgs) => {
+          const active = pkgs.filter(
+            (p) => !p.completed_at && (
+              p.package?.package_type === "credit"
+                ? (p.remaining_credits ?? 0) > 0
+                : p.remaining_uses > 0
+            )
+          );
+          setCustomerPackages(active);
+        })
+        .catch(() => setCustomerPackages([]))
+        .finally(() => setLoadingPackages(false));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist selected customer to sessionStorage
+  useEffect(() => {
+    try {
+      if (selectedCustomer) {
+        sessionStorage.setItem(CUSTOMER_STORAGE_KEY, JSON.stringify(selectedCustomer));
+      } else {
+        sessionStorage.removeItem(CUSTOMER_STORAGE_KEY);
+      }
+    } catch { /* ignore */ }
+  }, [selectedCustomer]);
+  const [pendingSellPackages, setPendingSellPackages] = useState<Package[]>([]);
+  const [pendingShowReceipt, setPendingShowReceipt] = useState(false);
+  const [deductingPackage, setDeductingPackage] = useState<CustomerPackage | null>(null);
+  const [deductedServiceNames, setDeductedServiceNames] = useState<string[]>([]);
+  const [extraCartItems, setExtraCartItems] = useState<CartItem[]>([]);
+  const [extraPaymentType, setExtraPaymentType] = useState<PaymentType | null>(null);
+  const [extraCashReceived, setExtraCashReceived] = useState("");
   const [registerOpen, setRegisterOpen] = useState(false);
   const [receiptNo, setReceiptNo] = useState("");
   const [receiptDate, setReceiptDate] = useState("");
   const [cashReceived, setCashReceived] = useState("");
   const uid = useId();
   const counterRef = useRef(0);
+  const lastDeductedNamesRef = useRef<string[] | null>(null);
+  const packageSoldInFlowRef = useRef(false);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 
   function addToCart(svc: Service) {
     const key = `${uid}-${counterRef.current++}-${svc.id}`;
@@ -108,10 +165,12 @@ export default function PaymentClient({ categories, customers }: Props) {
   function openPaymentDialog() {
     setPaymentType(null);
     setDialogStep("confirm");
-    setCustomerQuery("");
-    setReceiptCustomer(null);
-    setRegisterOpen(false);
     setCashReceived("");
+    setDeductedServiceNames([]);
+    setExtraCartItems([]);
+    setExtraPaymentType(null);
+    setExtraCashReceived("");
+    packageSoldInFlowRef.current = false;
     setDialogOpen(true);
   }
 
@@ -131,6 +190,8 @@ export default function PaymentClient({ categories, customers }: Props) {
     if (paymentType === "Cash") {
       setCashReceived("");
       setDialogStep("cash-entry");
+    } else if (paymentType === "Package") {
+      setDialogStep("package-deduct");
     } else {
       setReceiptNo(generateReceiptNo());
       setReceiptDate(
@@ -145,6 +206,90 @@ export default function PaymentClient({ categories, customers }: Props) {
       );
       setDialogStep("success");
     }
+  }
+
+  async function handleDeductClose() {
+    const names = lastDeductedNamesRef.current;
+    lastDeductedNamesRef.current = null;
+    setDeductingPackage(null);
+    // Re-fetch so the panel and receipt reflect updated uses
+    if (selectedCustomer) {
+      try {
+        const pkgs = await getPackagesByCustomerId(selectedCustomer.id);
+        const active = pkgs.filter(
+          (p) => !p.completed_at && (
+            p.package?.package_type === "credit"
+              ? (p.remaining_credits ?? 0) > 0
+              : p.remaining_uses > 0
+          )
+        );
+        setCustomerPackages(active);
+      } catch { /* keep existing */ }
+    }
+    if (names !== null) {
+      // Deduction was confirmed — skip back to package list and go straight to extra payment check
+      const allDeducted = new Set([...deductedServiceNames, ...names]);
+      const extras = cart.filter((item) => !allDeducted.has(item.service.name));
+      if (extras.length > 0) {
+        setExtraCartItems(extras);
+        setExtraPaymentType(null);
+        setExtraCashReceived("");
+        setDialogStep("extra-payment");
+      } else {
+        setReceiptNo(generateReceiptNo());
+        setReceiptDate(
+          new Date().toLocaleString("en-MY", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+          })
+        );
+        setDialogStep("success");
+      }
+    }
+  }
+
+  function handlePackageDeductDone() {
+    // Detect cart items whose service name was not deducted from any package
+    const deductedSet = new Set(deductedServiceNames);
+    const extras = cart.filter((item) => !deductedSet.has(item.service.name));
+    if (extras.length > 0) {
+      setExtraCartItems(extras);
+      setExtraPaymentType(null);
+      setExtraCashReceived("");
+      setDialogStep("extra-payment");
+    } else {
+      setReceiptNo(generateReceiptNo());
+      setReceiptDate(
+        new Date().toLocaleString("en-MY", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        })
+      );
+      setDialogStep("success");
+    }
+  }
+
+  function handleExtraPaymentConfirm() {
+    setReceiptNo(generateReceiptNo());
+    setReceiptDate(
+      new Date().toLocaleString("en-MY", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    );
+    setDialogStep("success");
   }
 
   function handleCashConfirm() {
@@ -162,51 +307,129 @@ export default function PaymentClient({ categories, customers }: Props) {
     setDialogStep("success");
   }
 
+  async function handleCustomerSelect(c: Customer) {
+    setSelectedCustomer(c);
+    setCustomerQuery("");
+    setLoadingPackages(true);
+    try {
+      const pkgs = await getPackagesByCustomerId(c.id);
+      const active = pkgs.filter(
+        (p) => !p.completed_at && (
+          p.package?.package_type === "credit"
+            ? (p.remaining_credits ?? 0) > 0
+            : p.remaining_uses > 0
+        )
+      );
+      setCustomerPackages(active);
+    } catch {
+      setCustomerPackages([]);
+    } finally {
+      setLoadingPackages(false);
+    }
+  }
+
+  function handleCustomerClear() {
+    setSelectedCustomer(null);
+    setCustomerPackages([]);
+    setCustomerQuery("");
+  }
+
   function handleSendReceipt() {
+    // If cart contains packages and a customer is selected, sell packages first
+    if (selectedCustomer) {
+      const seen = new Set<string>();
+      const matched: Package[] = [];
+      for (const item of cart) {
+        const pkg = packages.find((p) => p.name === item.service.name && p.is_active);
+        if (pkg && !seen.has(pkg.id)) {
+          seen.add(pkg.id);
+          matched.push(pkg);
+        }
+      }
+      if (matched.length > 0) {
+        packageSoldInFlowRef.current = true;
+        setPendingSellPackages(matched);
+        setPendingShowReceipt(true);
+        return; // receipt shown after all package dialogs close
+      }
+    }
     setDialogStep("receipt-preview");
   }
 
-  function handleProceedToSend() {
-    setCustomerQuery("");
-    setReceiptCustomer(null);
-    setRegisterOpen(false);
-    setDialogStep("receipt");
+  async function handleSellPackageDialogClose() {
+    const newQueue = pendingSellPackages.slice(1);
+    setPendingSellPackages(newQueue);
+    if (newQueue.length === 0 && pendingShowReceipt) {
+      setPendingShowReceipt(false);
+      // Re-fetch so receipt reflects newly assigned packages
+      if (selectedCustomer) {
+        try {
+          const pkgs = await getPackagesByCustomerId(selectedCustomer.id);
+          const active = pkgs.filter(
+            (p) => !p.completed_at && (
+              p.package?.package_type === "credit"
+                ? (p.remaining_credits ?? 0) > 0
+                : p.remaining_uses > 0
+            )
+          );
+          setCustomerPackages(active);
+        } catch { /* keep existing */ }
+      }
+      setDialogStep("receipt-preview");
+    }
   }
 
   async function handleDoSend() {
-    const phone = receiptCustomer?.contact_number ?? "";
-    const name = receiptCustomer?.name ?? "";
+    const isPackagePayment = packageSoldInFlowRef.current;
     try {
       await createTransaction({
         receipt_no: receiptNo,
-        payment_type: paymentType ?? "",
+        payment_type: isPackagePayment
+          ? `Package Sale - ${extraPaymentType ?? paymentType ?? ""}`
+          : extraPaymentType ? `Package + ${extraPaymentType}` : (paymentType ?? ""),
         total,
-        cash_received: paymentType === "Cash" && cashReceived ? parseFloat(cashReceived) : null,
-        change_given: paymentType === "Cash" && cashReceived ? Math.max(0, parseFloat(cashReceived) - total) : null,
-        customer_id: receiptCustomer?.id ?? null,
-        customer_name: name || null,
-        customer_phone: phone || null,
+        cash_received: extraPaymentType === "Cash" && extraCashReceived
+          ? parseFloat(extraCashReceived)
+          : paymentType === "Cash" && cashReceived ? parseFloat(cashReceived) : null,
+        change_given: extraPaymentType === "Cash" && extraCashReceived
+          ? Math.max(0, parseFloat(extraCashReceived) - extraTotal)
+          : paymentType === "Cash" && cashReceived ? Math.max(0, parseFloat(cashReceived) - total) : null,
+        customer_id: selectedCustomer?.id ?? null,
+        customer_name: selectedCustomer?.name || null,
+        customer_phone: selectedCustomer?.contact_number || null,
         items: cart.map((item) => ({
           service_name: item.service.name,
           qty: parseFloat(item.qty) || 1,
           unit_price: parseFloat(item.price) || 0,
           subtotal: (parseFloat(item.qty) || 1) * (parseFloat(item.price) || 0),
         })),
+        receipt_snapshot: {
+          customerPackages: customerPackages.length > 0 ? customerPackages : undefined,
+          extraPaymentType: extraPaymentType ?? undefined,
+          extraTotal: extraCartItems.length > 0 ? extraTotal : undefined,
+          extraCashReceived: extraPaymentType === "Cash" && extraCashReceived ? parseFloat(extraCashReceived) : undefined,
+          extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
+        },
       });
     } catch {
-      // non-blocking — receipt still sends even if DB save fails
+      // non-blocking — receipt still saves even if DB write fails
     }
-    toast.success(`Receipt sent to ${name} (${phone})`);
+    const msg = selectedCustomer
+      ? `Receipt saved for ${selectedCustomer.name}.`
+      : "Receipt saved.";
+    toast.success(msg);
     setDialogOpen(false);
+    setSelectedCustomer(null);
     clearCart();
   }
 
   function handleDialogClose(open: boolean) {
     if (!open) {
-      setDialogOpen(false);
-      if (dialogStep === "receipt" || dialogStep === "receipt-preview" || dialogStep === "cash-entry") {
-        clearCart();
+      if (dialogStep === "success" || dialogStep === "receipt-preview") {
+        // X is hidden on these steps; also block outside-click close
+        return;
       }
+      setCloseConfirmOpen(true);
     }
   }
 
@@ -218,6 +441,12 @@ export default function PaymentClient({ categories, customers }: Props) {
     .slice(0, 8);
 
   const total = cart.reduce((sum, item) => {
+    const p = parseFloat(item.price);
+    const q = parseFloat(item.qty);
+    return sum + (isNaN(p) || isNaN(q) ? 0 : p * q);
+  }, 0);
+
+  const extraTotal = extraCartItems.reduce((sum, item) => {
     const p = parseFloat(item.price);
     const q = parseFloat(item.qty);
     return sum + (isNaN(p) || isNaN(q) ? 0 : p * q);
@@ -276,6 +505,96 @@ export default function PaymentClient({ categories, customers }: Props) {
             >
               Clear all
             </button>
+          )}
+        </div>
+
+        {/* Customer selector + active packages */}
+        <div className="px-6 py-3 border-b space-y-2">
+          <p className="text-sm font-semibold text-gray-700">Customer</p>
+          {!selectedCustomer ? (
+            <>
+              <Input
+                placeholder="Search by name or phone…"
+                value={customerQuery}
+                onChange={(e) => setCustomerQuery(e.target.value)}
+              />
+              {filteredCustomers.length > 0 && (
+                <div className="border rounded-lg divide-y max-h-36 overflow-y-auto">
+                  {filteredCustomers.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => void handleCustomerSelect(c)}
+                      className="w-full text-left px-3 py-2 text-sm flex justify-between hover:bg-gray-50 transition-colors"
+                    >
+                      <span>{c.name}</span>
+                      <span className="text-gray-400">{c.contact_number}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setRegisterOpen(true)}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                + New customer
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="border rounded-lg px-3 py-2 text-sm bg-gray-50 flex items-center justify-between">
+                <div>
+                  <p className="font-medium">{selectedCustomer.name}</p>
+                  <p className="text-gray-500">{selectedCustomer.contact_number}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCustomerClear}
+                  className="text-xs text-gray-400 hover:text-gray-600 ml-3 flex-shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+
+              {loadingPackages && (
+                <p className="text-xs text-gray-400">Loading packages…</p>
+              )}
+              {!loadingPackages && customerPackages.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Active Packages</p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {customerPackages.map((cp) => (
+                      <div key={cp.id} className="border rounded-lg px-3 py-2 bg-white">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-sm">{cp.package?.name ?? "Package"}</span>
+                          <span className="text-xs text-gray-400 capitalize">{cp.package?.package_type ?? "services"}</span>
+                        </div>
+                        {cp.package?.package_type === "credit" ? (
+                          <p className="text-xs text-gray-600">
+                            Credits: <span className="font-semibold">{(cp.remaining_credits ?? 0).toFixed(2)}</span> remaining
+                          </p>
+                        ) : (
+                          <ul className="space-y-0.5">
+                            {(cp.items ?? []).map((item) => (
+                              <li key={item.id} className="flex justify-between text-xs text-gray-600">
+                                <span>{item.service_name}</span>
+                                <span className={item.remaining_uses === 0 ? "text-gray-300" : "font-semibold"}>
+                                  {item.remaining_uses}/{item.total_uses} left
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!loadingPackages && customerPackages.length === 0 && (
+                <p className="text-xs text-gray-400">No active packages.</p>
+              )}
+            </>
           )}
         </div>
 
@@ -350,7 +669,10 @@ export default function PaymentClient({ categories, customers }: Props) {
 
       {/* Payment dialog */}
       <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
-        <DialogContent className={dialogStep === "receipt-preview" ? "max-w-md" : "max-w-sm"}>
+        <DialogContent
+          className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none"
+          showCloseButton={dialogStep !== "success" && dialogStep !== "receipt-preview"}
+        >
 
           {dialogStep === "cash-entry" && (
             <>
@@ -455,6 +777,160 @@ export default function PaymentClient({ categories, customers }: Props) {
             </>
           )}
 
+          {dialogStep === "package-deduct" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Deduct Package Uses</DialogTitle>
+              </DialogHeader>
+
+              {customerPackages.length === 0 ? (
+                <p className="text-sm text-gray-500 py-2">
+                  No active packages found for this customer.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-500">Tap a package to deduct uses for it.</p>
+                  {customerPackages.map((cp) => (
+                    <button
+                      key={cp.id}
+                      type="button"
+                      onClick={() => setDeductingPackage(cp)}
+                      className="w-full text-left border rounded-lg px-3 py-2 text-sm hover:border-gray-400 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold">{cp.package?.name ?? "Package"}</span>
+                        <span className="text-xs text-gray-400 capitalize">{cp.package?.package_type ?? "services"}</span>
+                      </div>
+                      {cp.package?.package_type === "credit" ? (
+                        <p className="text-xs text-gray-600">
+                          Credits: <span className="font-semibold">{(cp.remaining_credits ?? 0).toFixed(2)}</span> remaining
+                        </p>
+                      ) : (
+                        <ul className="space-y-0.5">
+                          {(cp.items ?? []).map((item) => (
+                            <li key={item.id} className="flex justify-between text-xs text-gray-600">
+                              <span>{item.service_name}</span>
+                              <span className={item.remaining_uses === 0 ? "text-gray-300" : "font-semibold"}>
+                                {item.remaining_uses}/{item.total_uses} left
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <Button className="w-full mt-2" onClick={handlePackageDeductDone}>
+                Done — Proceed to Receipt
+              </Button>
+            </>
+          )}
+
+          {dialogStep === "extra-payment" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Additional Payment Required</DialogTitle>
+              </DialogHeader>
+
+              <p className="text-sm text-gray-500">
+                These services are not covered by the package and require an extra payment:
+              </p>
+
+              <div className="text-sm max-h-40 overflow-y-auto">
+                <div className="flex gap-2 text-xs text-gray-400 font-medium pb-1 border-b mb-1">
+                  <span className="flex-1">Service</span>
+                  <span className="w-10 text-center">Qty</span>
+                  <span className="w-16 text-right">Price</span>
+                </div>
+                {extraCartItems.map((item) => {
+                  const p = parseFloat(item.price);
+                  const q = parseFloat(item.qty);
+                  const sub = isNaN(p) || isNaN(q) ? 0 : p * q;
+                  return (
+                    <div key={item.key} className="flex gap-2 py-0.5">
+                      <span className="flex-1 truncate text-gray-700">{item.service.name}</span>
+                      <span className="w-10 text-center text-gray-500">{item.qty}</span>
+                      <span className="w-16 text-right font-medium">{sub.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-between items-center border-t pt-2 font-bold">
+                <span>Extra Total</span>
+                <span>RM {extraTotal.toFixed(2)}</span>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-600">Payment type</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {PAYMENT_TYPES.filter((t) => t !== "Package").map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setExtraPaymentType(type)}
+                      className={`border rounded-lg px-3 py-2 text-sm text-left transition-colors ${
+                        extraPaymentType === type
+                          ? "border-black bg-black text-white"
+                          : "hover:border-gray-400"
+                      }`}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {extraPaymentType === "Cash" && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-600">Cash Received (RM)</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={extraCashReceived}
+                    onChange={(e) => setExtraCashReceived(e.target.value)}
+                    autoFocus
+                  />
+                  {extraCashReceived !== "" && !isNaN(parseFloat(extraCashReceived)) && (
+                    <div className="flex justify-between rounded-lg bg-gray-50 px-4 py-3">
+                      <span className="font-medium">Change</span>
+                      <span className="font-bold text-lg">
+                        RM {Math.max(0, parseFloat(extraCashReceived) - extraTotal).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setDialogStep("package-deduct")}
+                >
+                  ← Back to Package
+                </Button>
+                <Button
+                  className="flex-1"
+                  disabled={
+                    !extraPaymentType ||
+                    (extraPaymentType === "Cash" &&
+                      (!extraCashReceived ||
+                        isNaN(parseFloat(extraCashReceived)) ||
+                        parseFloat(extraCashReceived) < extraTotal))
+                  }
+                  onClick={handleExtraPaymentConfirm}
+                >
+                  Confirm Extra Payment
+                </Button>
+              </div>
+            </>
+          )}
+
           {dialogStep === "success" && (
             <div className="flex flex-col items-center gap-4 py-4 text-center">
               <CheckCircle2 size={56} className="text-green-500" />
@@ -465,7 +941,7 @@ export default function PaymentClient({ categories, customers }: Props) {
                 </p>
               </div>
               <Button className="w-full" onClick={handleSendReceipt}>
-                View Receipt
+                Next
               </Button>
             </div>
           )}
@@ -475,6 +951,15 @@ export default function PaymentClient({ categories, customers }: Props) {
               <DialogHeader>
                 <DialogTitle>Receipt Preview</DialogTitle>
               </DialogHeader>
+
+              {selectedCustomer && (
+                <div className="border rounded-lg px-3 py-2 text-sm bg-gray-50 flex items-center gap-3">
+                  <div>
+                    <p className="font-medium">{selectedCustomer.name}</p>
+                    <p className="text-gray-500">{selectedCustomer.contact_number}</p>
+                  </div>
+                </div>
+              )}
 
               <ReceiptView
                 receiptNo={receiptNo}
@@ -496,83 +981,27 @@ export default function PaymentClient({ categories, customers }: Props) {
                     ? Math.max(0, parseFloat(cashReceived) - total)
                     : null
                 }
+                extraPaymentType={extraPaymentType ?? undefined}
+                extraTotal={extraCartItems.length > 0 ? extraTotal : undefined}
+                extraCashReceived={
+                  extraPaymentType === "Cash" && extraCashReceived
+                    ? parseFloat(extraCashReceived)
+                    : undefined
+                }
+                extraChangeGiven={
+                  extraPaymentType === "Cash" && extraCashReceived
+                    ? Math.max(0, parseFloat(extraCashReceived) - extraTotal)
+                    : undefined
+                }
+                customerPackages={customerPackages.length > 0 ? customerPackages : undefined}
               />
 
-              <Button className="w-full" onClick={handleProceedToSend}>
-                Send Receipt
+              <Button className="w-full" onClick={handleDoSend}>
+                {selectedCustomer ? `Save & Send to ${selectedCustomer.name}` : "Save Receipt"}
               </Button>
             </>
           )}
 
-          {dialogStep === "receipt" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Send Receipt</DialogTitle>
-              </DialogHeader>
-
-              <div className="space-y-3">
-                {/* Show search input only when no customer selected yet */}
-                {!receiptCustomer && (
-                  <>
-                    <Input
-                      placeholder="Search customer by name or phone..."
-                      value={customerQuery}
-                      onChange={(e) => setCustomerQuery(e.target.value)}
-                      autoFocus
-                    />
-                    {filteredCustomers.length > 0 && (
-                      <div className="border rounded-lg divide-y max-h-40 overflow-y-auto">
-                        {filteredCustomers.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => { setReceiptCustomer(c); setCustomerQuery(""); }}
-                            className="w-full text-left px-3 py-2 text-sm flex justify-between hover:bg-gray-50 transition-colors"
-                          >
-                            <span>{c.name}</span>
-                            <span className="text-gray-400">{c.contact_number}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Selected customer card with change link */}
-                {receiptCustomer && (
-                  <div className="border rounded-lg px-3 py-2 text-sm bg-gray-50 flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{receiptCustomer.name}</p>
-                      <p className="text-gray-500">{receiptCustomer.contact_number}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setReceiptCustomer(null)}
-                      className="text-xs text-gray-400 hover:text-gray-600 ml-3 flex-shrink-0"
-                    >
-                      Change
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setRegisterOpen(true)}
-                  className="text-sm text-blue-600 hover:underline"
-                >
-                  + New customer
-                </button>
-              </div>
-
-              <Button
-                className="w-full"
-                disabled={receiptCustomer === null}
-                onClick={handleDoSend}
-              >
-                Send
-              </Button>
-            </>
-          )}
         </DialogContent>
       </Dialog>
 
@@ -581,10 +1010,49 @@ export default function PaymentClient({ categories, customers }: Props) {
         open={registerOpen}
         onClose={() => setRegisterOpen(false)}
         onCreated={(newCustomer) => {
-          setReceiptCustomer(newCustomer);
+          void handleCustomerSelect(newCustomer);
           setRegisterOpen(false);
         }}
       />
+
+      {/* Post-payment: sell matched package(s) to the customer */}
+      <SellPackageDialog
+        open={pendingSellPackages.length > 0}
+        onClose={() => void handleSellPackageDialogClose()}
+        packages={packages}
+        customers={customers}
+        defaultCustomerId={selectedCustomer?.id}
+        defaultPackageId={pendingSellPackages[0]?.id}
+        defaultPaymentType={paymentType ?? undefined}
+        skipTransaction
+      />
+
+      {/* Deduct use from a package during Package payment */}
+      <DeductUseDialog
+        open={deductingPackage !== null}
+        onClose={() => void handleDeductClose()}
+        onDeducted={(names) => {
+        lastDeductedNamesRef.current = names;
+        setDeductedServiceNames((prev) => [...prev, ...names]);
+      }}
+        customerPackage={deductingPackage}
+        cartServiceNames={cart.map((item) => item.service.name)}
+        cartItems={cart.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty }))}
+      />
+
+      {/* Cancel payment confirmation */}
+      <Dialog open={closeConfirmOpen} onOpenChange={(v) => { if (!v) setCloseConfirmOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancel payment?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">The current payment will be discarded. Are you sure?</p>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setCloseConfirmOpen(false)}>Keep editing</Button>
+            <Button variant="destructive" onClick={() => { setCloseConfirmOpen(false); setDialogOpen(false); }}>Discard payment</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

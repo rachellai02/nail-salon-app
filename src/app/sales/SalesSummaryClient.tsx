@@ -29,7 +29,7 @@ export default function SalesSummaryClient({ transactions, onMonthClick, onDayCl
     type YearData = { total: number; months: Record<string, MonthData> };
     const g: Record<string, YearData> = {};
     for (const tx of transactions) {
-      const d = tx.transacted_at.slice(0, 10);
+      const d = new Date(tx.transacted_at).toLocaleDateString("en-CA"); // YYYY-MM-DD in local tz
       const [y, m, day] = d.split("-");
       if (!g[y]) g[y] = { total: 0, months: {} };
       g[y].total += Number(tx.total);
@@ -78,8 +78,8 @@ export default function SalesSummaryClient({ transactions, onMonthClick, onDayCl
           )}
           {years.flatMap((year) => {
             const isYearExpanded = expandedYears.has(year);
-            const sortedMonths = Object.keys(grouped[year].months).sort(
-              (a, b) => Number(b) - Number(a)
+            const sortedMonths = Array.from({ length: 12 }, (_, i) =>
+              String(i + 1).padStart(2, "0")
             );
 
             const yearRow = (
@@ -110,9 +110,10 @@ export default function SalesSummaryClient({ transactions, onMonthClick, onDayCl
             const monthRows = sortedMonths.flatMap((month) => {
               const monthKey = `${year}-${month}`;
               const isMonthExpanded = expandedMonths.has(monthKey);
-              const monthData = grouped[year].months[month];
-              const sortedDays = Object.keys(monthData.days).sort(
-                (a, b) => Number(b) - Number(a)
+              const monthData = grouped[year].months[month] ?? { total: 0, days: {} };
+              const daysInMonth = new Date(Number(year), Number(month), 0).getDate();
+              const sortedDays = Array.from({ length: daysInMonth }, (_, i) =>
+                String(i + 1).padStart(2, "0")
               );
               const monthName = MONTH_NAMES[Number(month) - 1];
 
@@ -142,29 +143,32 @@ export default function SalesSummaryClient({ transactions, onMonthClick, onDayCl
                       </button>
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-right">{monthData.total.toFixed(2)}</td>
+                  <td className={`px-5 py-3 text-right ${monthData.total === 0 ? "text-gray-300" : ""}`}>{monthData.total.toFixed(2)}</td>
                 </tr>
               );
 
               if (!isMonthExpanded) return [monthRow];
 
-              const dayRows = sortedDays.map((day) => (
-                <tr key={`${monthKey}-${day}`} className="border-b bg-blue-50/20">
-                  <td className="px-5 py-3 pl-16 text-gray-300 text-xs">{year}</td>
-                  <td className="px-5 py-3 pl-14">
-                    <button
-                      type="button"
-                      className="text-gray-600 hover:underline hover:text-blue-600"
-                      onClick={() => onDayClick?.(Number(year), Number(month), Number(day))}
-                    >
-                      {monthName} {Number(day)}
-                    </button>
-                  </td>
-                  <td className="px-5 py-3 text-right text-gray-700">
-                    {monthData.days[day].toFixed(2)}
-                  </td>
-                </tr>
-              ));
+              const dayRows = sortedDays.map((day) => {
+                const dayTotal = monthData.days[day] ?? 0;
+                return (
+                  <tr key={`${monthKey}-${day}`} className="border-b bg-blue-50/20">
+                    <td className="px-5 py-3 pl-16 text-gray-300 text-xs">{year}</td>
+                    <td className="px-5 py-3 pl-14">
+                      <button
+                        type="button"
+                        className="text-gray-600 hover:underline hover:text-blue-600"
+                        onClick={() => onDayClick?.(Number(year), Number(month), Number(day))}
+                      >
+                        {monthName} {Number(day)}
+                      </button>
+                    </td>
+                    <td className={`px-5 py-3 text-right ${dayTotal === 0 ? "text-gray-300" : "text-gray-700"}`}>
+                      {dayTotal.toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              });
 
               return [monthRow, ...dayRows];
             });
