@@ -27,6 +27,7 @@ type ReceiptViewProps = {
   extraTotal?: number;
   extraCashReceived?: number | null;
   extraChangeGiven?: number | null;
+  packageDeductions?: { packageName: string; amount: number }[];
 };
 
 export function ReceiptView({
@@ -43,6 +44,7 @@ export function ReceiptView({
   extraTotal,
   extraCashReceived,
   extraChangeGiven,
+  packageDeductions,
 }: ReceiptViewProps) {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
@@ -102,39 +104,63 @@ export function ReceiptView({
       </div>
 
       {(paymentType === "Package" || paymentType.startsWith("Package +")) ? (
-        <>
-          <div className="flex justify-between">
-            <span>{extraPaymentType === "Package" ? "Package Deduction 1" : "Package Deduction"}</span>
-            <span>- RM {(total - (extraTotal ?? 0)).toFixed(2)}</span>
-          </div>
-          {extraPaymentType === "Package" && extraTotal != null && (
-            <div className="flex justify-between">
-              <span>Package Deduction 2</span>
-              <span>- RM {extraTotal.toFixed(2)}</span>
-            </div>
-          )}
-          <div className="border-t border-dashed border-gray-300" />
-          <div className="flex justify-between font-bold">
-            <span>Final Payment Amount</span>
-            <span>RM {extraPaymentType === "Package" ? "0.00" : (extraTotal ?? 0).toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Payment</span>
-            <span>{extraPaymentType === "Package" ? "Package (Fully Covered)" : (extraPaymentType ?? "Package (Fully Covered)")}</span>
-          </div>
-          {extraPaymentType === "Cash" && extraCashReceived != null && (
+        (() => {
+          // Use saved packageDeductions array if available; otherwise fall back to derived values
+          const deductions: { label: string; amount: number }[] =
+            packageDeductions && packageDeductions.length > 0
+              ? packageDeductions.map((d, i) => ({
+                  label: packageDeductions.length === 1
+                    ? `Package Deduction (${d.packageName})`
+                    : `Package Deduction ${i + 1} (${d.packageName})`,
+                  amount: d.amount,
+                }))
+              : extraPaymentType === "Package"
+              ? [
+                  { label: "Package Deduction 1", amount: total - (extraTotal ?? 0) },
+                  { label: "Package Deduction 2", amount: extraTotal ?? 0 },
+                ]
+              : [{ label: "Package Deduction", amount: total - (extraTotal ?? 0) }];
+
+          const totalDeducted = deductions.reduce((s, d) => s + d.amount, 0);
+          const finalAmount = Math.max(0, total - totalDeducted);
+          const isFullyCovered = finalAmount === 0;
+
+          return (
             <>
-              <div className="flex justify-between">
-                <span>Cash Received</span>
-                <span>RM {Number(extraCashReceived).toFixed(2)}</span>
+              {deductions.map((d, i) => (
+                <div key={i} className="flex justify-between">
+                  <span>{d.label}</span>
+                  <span>- RM {d.amount.toFixed(2)}</span>
+                </div>
+              ))}
+              <div className="border-t border-dashed border-gray-300" />
+              <div className="flex justify-between font-bold">
+                <span>Final Payment Amount</span>
+                <span>RM {finalAmount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
-                <span>Change</span>
-                <span>RM {Number(extraChangeGiven ?? 0).toFixed(2)}</span>
+                <span>Payment</span>
+                <span>
+                  {isFullyCovered
+                    ? "Package (Fully Covered)"
+                    : (extraPaymentType ?? "Package (Fully Covered)")}
+                </span>
               </div>
+              {extraPaymentType === "Cash" && extraCashReceived != null && (
+                <>
+                  <div className="flex justify-between">
+                    <span>Cash Received</span>
+                    <span>RM {Number(extraCashReceived).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Change</span>
+                    <span>RM {Number(extraChangeGiven ?? 0).toFixed(2)}</span>
+                  </div>
+                </>
+              )}
             </>
-          )}
-        </>
+          );
+        })()
       ) : (
         <>
           <div className="flex justify-between">

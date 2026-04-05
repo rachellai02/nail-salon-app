@@ -510,6 +510,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
                 extraTotal={receiptTx.receipt_snapshot?.extraTotal}
                 extraCashReceived={receiptTx.receipt_snapshot?.extraCashReceived}
                 extraChangeGiven={receiptTx.receipt_snapshot?.extraChangeGiven}
+                packageDeductions={receiptTx.receipt_snapshot?.packageDeductions}
               />
               {receiptTx.is_voided && (
                 <Button

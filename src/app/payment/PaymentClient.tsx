@@ -131,6 +131,9 @@ export default function PaymentClient({ categories, customers, packages }: Props
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [extraCreditTopup, setExtraCreditTopup] = useState<number | null>(null);
   const [extraTopupPackage, setExtraTopupPackage] = useState<CustomerPackage | null>(null);
+  const [packageDeductions, setPackageDeductions] = useState<{ packageName: string; amount: number }[]>([]);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   function addToCart(svc: Service) {
     const key = `${uid}-${counterRef.current++}-${svc.id}`;
@@ -176,6 +179,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
     setExtraTopupPackage(null);
     setExtraPaymentType(null);
     setExtraCashReceived("");
+    setPackageDeductions([]);
     packageSoldInFlowRef.current = false;
     setDialogOpen(true);
   }
@@ -233,21 +237,73 @@ export default function PaymentClient({ categories, customers, packages }: Props
       } catch { /* keep existing */ }
     }
     if (names !== null) {
-      // If this was a topup deduction — go straight to success
+      // If this was a topup/extra-package deduction
       if (isTopupDeductRef.current) {
         isTopupDeductRef.current = false;
-        setReceiptNo(generateReceiptNo());
-        setReceiptDate(
-          new Date().toLocaleString("en-MY", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
-          })
-        );
-        setDialogStep("success");
+        const topup = lastCreditTopupRef.current;
+        lastCreditTopupRef.current = 0;
+
+        // Credit topup case (paying shortfall with another package)
+        if (extraCreditTopup !== null) {
+          // The topup package also ran short — loop back with the new remaining shortfall
+          if (topup > 0) {
+            setExtraCreditTopup(topup);
+            setExtraPaymentType(null);
+            setExtraTopupPackage(null);
+            setExtraCashReceived("");
+            setDialogStep("extra-payment");
+            return;
+          }
+          // Shortfall fully covered → success
+          setExtraCreditTopup(null);
+          setReceiptNo(generateReceiptNo());
+          setReceiptDate(
+            new Date().toLocaleString("en-MY", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+            })
+          );
+          setDialogStep("success");
+          return;
+        }
+
+        // Extra-items credit package ran short → trigger credit topup flow for the shortfall
+        if (topup > 0) {
+          setExtraCreditTopup(topup);
+          setExtraPaymentType(null);
+          setExtraTopupPackage(null);
+          setExtraCashReceived("");
+          setDialogStep("extra-payment");
+          return;
+        }
+
+        // Extra-items package deduction completed → check if any extra items still uncovered
+        const allDeducted = new Set([...deductedServiceNames, ...names]);
+        const remaining = extraCartItems.filter((item) => !allDeducted.has(item.service.name));
+        if (remaining.length > 0) {
+          setExtraCartItems(remaining);
+          setExtraPaymentType(null);
+          setExtraTopupPackage(null);
+          setExtraCashReceived("");
+          setDialogStep("extra-payment");
+        } else {
+          setReceiptNo(generateReceiptNo());
+          setReceiptDate(
+            new Date().toLocaleString("en-MY", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+            })
+          );
+          setDialogStep("success");
+        }
         return;
       }
       // If credit top-up is required, go straight to extra-payment for the shortfall
@@ -443,6 +499,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
           extraTotal: (extraCartItems.length > 0 || extraCreditTopup !== null) ? extraTotal : undefined,
           extraCashReceived: extraPaymentType === "Cash" && extraCashReceived ? parseFloat(extraCashReceived) : undefined,
           extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
+          packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
         },
       });
     } catch {
@@ -500,7 +557,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
         {categories.length === 0 && (
           <p className="text-gray-400 text-sm">No services configured yet.</p>
         )}
-        {!selectedCustomer && (
+        {mounted && !selectedCustomer && (
           <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             Select a customer before adding services.
           </p>
@@ -518,7 +575,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
                   <button
                     key={svc.id}
                     type="button"
-                    disabled={!selectedCustomer}
+                    disabled={mounted && !selectedCustomer}
                     onClick={() => addToCart(svc)}
                     className="flex items-center justify-between gap-4 border rounded-lg px-4 py-2 text-sm transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-gray-400 hover:enabled:bg-gray-50 active:enabled:bg-gray-100"
                   >
@@ -539,7 +596,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h2 className="text-xl font-bold">Payment</h2>
-          {cart.length > 0 && (
+          {mounted && cart.length > 0 && (
             <button
               type="button"
               onClick={clearCart}
@@ -933,7 +990,8 @@ export default function PaymentClient({ categories, customers, packages }: Props
                     (extraCreditTopup !== null &&
                       customerPackages.some(
                         (p) => p.package?.package_type === "credit" && (p.remaining_credits ?? 0) > 0
-                      ))
+                      )) ||
+                    (extraCartItems.length > 0 && customerPackages.length > 0)
                   ).map((type) => (
                     <button
                       key={type}
@@ -951,28 +1009,47 @@ export default function PaymentClient({ categories, customers, packages }: Props
                 </div>
               </div>
 
-              {extraPaymentType === "Package" && extraCreditTopup !== null && (
+              {extraPaymentType === "Package" && (
                 <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select package for top-up</p>
-                  {customerPackages
-                    .filter((p) => p.package?.package_type === "credit" && (p.remaining_credits ?? 0) > 0)
-                    .map((cp) => (
-                      <button
-                        key={cp.id}
-                        type="button"
-                        onClick={() => setExtraTopupPackage(cp)}
-                        className={`w-full flex items-center justify-between border rounded-lg px-3 py-2 text-sm transition-colors ${
-                          extraTopupPackage?.id === cp.id
-                            ? "border-black bg-black text-white"
-                            : "hover:border-gray-400"
-                        }`}
-                      >
-                        <span className="font-medium">{cp.package?.name}</span>
-                        <span className={`text-xs ${extraTopupPackage?.id === cp.id ? "text-gray-300" : "text-gray-400"}`}>
-                          {(cp.remaining_credits ?? 0).toFixed(2)} credits
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select package</p>
+                  {(extraCreditTopup !== null
+                    ? customerPackages.filter((p) => p.package?.package_type === "credit" && (p.remaining_credits ?? 0) > 0)
+                    : customerPackages
+                  ).map((cp) => (
+                    <button
+                      key={cp.id}
+                      type="button"
+                      onClick={() => setExtraTopupPackage(cp)}
+                      className={`w-full text-left border rounded-lg px-3 py-2 text-sm transition-colors ${
+                        extraTopupPackage?.id === cp.id
+                          ? "border-black bg-black text-white"
+                          : "hover:border-gray-400"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold">{cp.package?.name}</span>
+                        <span className={`text-xs capitalize ${extraTopupPackage?.id === cp.id ? "text-gray-300" : "text-gray-400"}`}>
+                          {cp.package?.package_type ?? "services"}
                         </span>
-                      </button>
-                    ))}
+                      </div>
+                      {cp.package?.package_type === "credit" ? (
+                        <p className={`text-xs ${extraTopupPackage?.id === cp.id ? "text-gray-300" : "text-gray-600"}`}>
+                          Credits: <span className="font-semibold">{(cp.remaining_credits ?? 0).toFixed(2)}</span> remaining
+                        </p>
+                      ) : (
+                        <ul className="space-y-0.5">
+                          {(cp.items ?? []).map((item) => (
+                            <li key={item.id} className={`flex justify-between text-xs ${extraTopupPackage?.id === cp.id ? "text-gray-300" : "text-gray-600"}`}>
+                              <span>{item.service_name}</span>
+                              <span className={item.remaining_uses === 0 ? "opacity-50" : "font-semibold"}>
+                                {item.remaining_uses}/{item.total_uses} left
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </button>
+                  ))}
                 </div>
               )}
 
@@ -1095,6 +1172,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
                     : undefined
                 }
                 customerPackages={customerPackages.length > 0 ? customerPackages : undefined}
+                packageDeductions={packageDeductions.length > 0 ? packageDeductions : undefined}
               />
 
               <Button className="w-full" onClick={handleDoSend}>
@@ -1136,12 +1214,43 @@ export default function PaymentClient({ categories, customers, packages }: Props
         lastDeductedNamesRef.current = names;
         lastCreditTopupRef.current = topup ?? 0;
         setDeductedServiceNames((prev) => [...prev, ...names]);
+        // Compute amount deducted from this package
+        const pkgName = deductingPackage?.package?.name ?? "Package";
+        const isCredit = deductingPackage?.package?.package_type === "credit";
+        let deductedAmount: number;
+        if (isCredit) {
+          if (isTopupDeductRef.current && extraCreditTopup !== null) {
+            // Paying a credit shortfall with another package — deduct only what this package actually covered
+            deductedAmount = extraCreditTopup - (topup ?? 0);
+          } else if (isTopupDeductRef.current) {
+            // Credit package used for extra cart items
+            deductedAmount = extraCartItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1), 0) - (topup ?? 0);
+          } else {
+            // Credit package used for main cart
+            deductedAmount = total - (topup ?? 0);
+          }
+        } else {
+          const nameSet = new Set(names);
+          const sourceItems = isTopupDeductRef.current ? extraCartItems : cart;
+          deductedAmount = sourceItems
+            .filter((item) => nameSet.has(item.service.name))
+            .reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1), 0);
+        }
+        setPackageDeductions((prev) => [...prev, { packageName: pkgName, amount: deductedAmount }]);
       }}
         customerPackage={deductingPackage}
-        cartServiceNames={isTopupDeductRef.current ? ["Package Top-Up"] : cart.map((item) => item.service.name)}
+        cartServiceNames={
+          isTopupDeductRef.current
+            ? (extraCreditTopup !== null
+                ? ["Package Top-Up"]
+                : extraCartItems.map((item) => item.service.name))
+            : cart.map((item) => item.service.name)
+        }
         cartItems={
           isTopupDeductRef.current
-            ? [{ service_name: "Package Top-Up", price: (extraCreditTopup ?? 0).toFixed(2), qty: "1" }]
+            ? (extraCreditTopup !== null
+                ? [{ service_name: "Package Top-Up", price: (extraCreditTopup ?? 0).toFixed(2), qty: "1" }]
+                : extraCartItems.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty })))
             : cart.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty }))
         }
       />

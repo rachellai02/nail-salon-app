@@ -275,7 +275,7 @@ export default function CustomerDetailClient({
               </TableRow>
             )}
             {activeCustomerPackages.map((cp) => {
-              const isExpired = !cp.expiry_date || todayLocal >= cp.expiry_date;
+              const isExpired = !!cp.expiry_date && todayLocal >= cp.expiry_date;
               return (
                 <TableRow key={cp.id}>
                   <TableCell>
@@ -364,11 +364,11 @@ export default function CustomerDetailClient({
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
-                        disabled={(
+                        disabled={
                           cp.package?.package_type === 'credit'
                             ? (cp.remaining_credits ?? 0) <= 0
                             : cp.remaining_uses <= 0
-                        ) || Boolean(isExpired)}
+                        }
                         onClick={() => setDeductTarget(cp)}
                       >
                         Deduct Use
@@ -421,7 +421,7 @@ export default function CustomerDetailClient({
                   </TableRow>
                 )}
                 {completedCustomerPackages.map((cp) => {
-                  const isExpired = !cp.expiry_date || todayLocal >= cp.expiry_date;
+                  const isExpired = !!cp.expiry_date && todayLocal >= cp.expiry_date;
                   return (
                     <TableRow key={cp.id}>
                       <TableCell>

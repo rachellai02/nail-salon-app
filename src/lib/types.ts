@@ -170,6 +170,7 @@ export type ReceiptSnapshot = {
   extraTotal?: number;
   extraCashReceived?: number | null;
   extraChangeGiven?: number | null;
+  packageDeductions?: { packageName: string; amount: number }[];
 };
 
 export type Transaction = {

@@ -92,13 +92,18 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
     }
   }, [open, defaultCustomerId, setValue]);
 
-  // Set default package when dialog opens
+  // Set default package when dialog opens or advances to next package in queue;
+  // also re-apply customer because form is reset after each submission
   useEffect(() => {
     if (open && defaultPackageId) {
       setSelectedPackageId(defaultPackageId);
       setValue("package_id", defaultPackageId);
+      if (defaultCustomerId) {
+        setSelectedCustomerId(defaultCustomerId);
+        setValue("customer_id", defaultCustomerId);
+      }
     }
-  }, [open, defaultPackageId, setValue]);
+  }, [open, defaultPackageId, defaultCustomerId, setValue]);
 
   // Set default payment type when dialog opens
   useEffect(() => {
@@ -153,7 +158,8 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
       setSelectedCustomerId("");
       setSelectedPackageId("");
       setSelectedExpiryYears("");
-      setSelectedPaymentType("");
+      // Preserve payment type if a default is provided (multi-package queue keeps open=true)
+      if (!defaultPaymentType) setSelectedPaymentType("");
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
@@ -170,7 +176,7 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); setSelectedPaymentType(""); onClose(); } }}>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); if (!defaultPaymentType) setSelectedPaymentType(""); onClose(); } }}>
         <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none px-5">
           <DialogHeader>
             <DialogTitle>Sell Package to Customer</DialogTitle>
@@ -293,7 +299,7 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
             </div>
             )}
             <DialogFooter className="pt-4 pb-4 pl-0 pr-5 sm:pl-0 sm:pr-5">
-              <Button type="button" variant="outline" onClick={() => { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); setSelectedPaymentType(""); onClose(); }}>
+              <Button type="button" variant="outline" onClick={() => { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); if (!defaultPaymentType) setSelectedPaymentType(""); onClose(); }}>
                 Cancel
               </Button>
               <Button type="submit" disabled={loading || !selectedPaymentType}>
