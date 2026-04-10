@@ -55,6 +55,12 @@ export default function NavBar() {
       >
         Archive
       </Link>
+      <Link
+        href="/employees"
+        className="text-sm text-black-600 hover:text-gray-500 hover:font-bold hover:underline font-medium"
+      >
+        Employees
+      </Link>
       <div className="ml-auto">
         <LogoutButton />
       </div>

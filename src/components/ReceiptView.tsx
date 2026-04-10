@@ -213,6 +213,7 @@ export function ReceiptView({
           <br></br>
           <div className="border-t border-dashed border-gray-300" />
           <br></br>
+          <p className="font-bold">Customer ID: {customerPackages[0]?.customer?.customer_code ?? "N/A"}</p>
           <p className="font-bold">Customer Name: {customerPackages[0]?.customer?.name ?? "N/A"}</p>
           <p className="font-bold">Phone Number: {customerPackages[0]?.customer?.contact_number ?? "N/A"}</p>
           <br></br>

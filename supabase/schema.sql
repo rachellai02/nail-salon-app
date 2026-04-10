@@ -438,3 +438,14 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 -- Step N+3: Add receipt_snapshot column to store the exact receipt state at time of payment
 ALTER TABLE sales_transactions ADD COLUMN IF NOT EXISTS receipt_snapshot JSONB;
 ALTER TABLE archived_transactions ADD COLUMN IF NOT EXISTS receipt_snapshot JSONB;
+
+-- Step N+4: Create employees table
+CREATE TABLE IF NOT EXISTS employees (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_code INTEGER GENERATED ALWAYS AS IDENTITY UNIQUE,  -- display ID (001, 002, ...)
+  name          TEXT NOT NULL,
+  date_of_birth DATE,
+  email         TEXT,
+  phone_number  TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -203,3 +203,16 @@ export type ArchivedTransaction = {
   is_voided: boolean;
   deleted_at: string;
 };
+
+export type Employee = {
+  id: string;
+  employee_code: number;   // auto-generated: 1, 2, 3 … displayed as 001, 002 …
+  name: string;
+  nickname: string | null;
+  date_of_birth: string | null;  // ISO date string YYYY-MM-DD
+  start_date: string | null;     // ISO date string YYYY-MM-DD
+  email: string | null;
+  phone_number: string | null;
+  is_active: boolean;
+  created_at: string;
+};

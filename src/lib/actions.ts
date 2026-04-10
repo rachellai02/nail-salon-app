@@ -19,6 +19,7 @@ import {
   TransactionItem,
   ArchivedTransaction,
   ReceiptSnapshot,
+  Employee,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -1894,4 +1895,93 @@ export async function restoreArchivedTransaction(archivedId: string): Promise<vo
   if (deleteError) throw new Error(deleteError.message);
 
   revalidatePath("/sales");
+}
+
+// -------------------------------------------------------
+// EMPLOYEE ACTIONS
+// -------------------------------------------------------
+
+export async function getEmployees(): Promise<Employee[]> {
+  const { data, error } = await supabase
+    .from("employees")
+    .select("*")
+    .order("employee_code", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getEmployeeById(id: string): Promise<Employee | null> {
+  if (!id || !UUID_REGEX.test(id)) return null;
+  const { data, error } = await supabase
+    .from("employees")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) return null;
+  return data;
+}
+
+export async function createEmployee(input: {
+  name: string;
+  nickname?: string;
+  date_of_birth?: string;
+  start_date?: string;
+  email?: string;
+  phone_number?: string;
+}): Promise<Employee> {
+  const { data, error } = await supabase
+    .from("employees")
+    .insert([{
+      name: input.name.trim(),
+      nickname: input.nickname?.trim() || null,
+      date_of_birth: input.date_of_birth?.trim() || null,
+      start_date: input.start_date?.trim() || null,
+      email: input.email?.trim() || null,
+      phone_number: input.phone_number?.trim() || null,
+    }])
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/employees");
+  return data;
+}
+
+export async function updateEmployee(id: string, input: {
+  name?: string;
+  nickname?: string | null;
+  date_of_birth?: string | null;
+  start_date?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  is_active?: boolean;
+}): Promise<Employee> {
+  if (!id || !UUID_REGEX.test(id)) throw new Error("Invalid employee ID");
+  const { data, error } = await supabase
+    .from("employees")
+    .update({
+      ...(input.name !== undefined && { name: input.name.trim() }),
+      ...(input.nickname !== undefined && { nickname: input.nickname?.trim() || null }),
+      ...(input.date_of_birth !== undefined && { date_of_birth: input.date_of_birth || null }),
+      ...(input.start_date !== undefined && { start_date: input.start_date || null }),
+      ...(input.email !== undefined && { email: input.email?.trim() || null }),
+      ...(input.phone_number !== undefined && { phone_number: input.phone_number?.trim() || null }),
+      ...(input.is_active !== undefined && { is_active: input.is_active }),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/employees");
+  revalidatePath(`/employees/${id}`);
+  return data;
+}
+
+export async function deleteEmployee(id: string): Promise<void> {
+  if (!id || !UUID_REGEX.test(id)) throw new Error("Invalid employee ID");
+  const { error } = await supabase
+    .from("employees")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/employees");
 }
