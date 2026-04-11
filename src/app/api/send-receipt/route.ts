@@ -48,7 +48,7 @@ const SHOP_ADDR = "5M, Jalan Delima, Island Glades, 11700 Gelugor, Penang.";
 
 const RECEIPT_CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: ui-monospace, 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 32px; background: white; color: #000; }
+body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 32px; background: white; color: #000; }
 .center { text-align: center; }
 .right { text-align: right; }
 .bold { font-weight: 700; }
@@ -184,6 +184,8 @@ function buildReceiptHtml(data: SendReceiptPayload): string {
   return `<!DOCTYPE html>
 <html><head>
   <meta charset="utf-8"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
   <title>Receipt ${escHtml(receiptNo)}</title>
   <style>${RECEIPT_CSS}</style>
 </head>
