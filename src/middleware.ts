@@ -10,9 +10,10 @@ const SESSION_COOKIE = "auth-session";
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Always allow static assets and auth-related routes
+  // Always allow static assets, auth-related routes, and public API webhooks
   if (
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/whatsapp/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico"
   ) {

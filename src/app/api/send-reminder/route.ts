@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
 
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const accessToken   = process.env.WHATSAPP_ACCESS_TOKEN;
-    const version       = process.env.WHATSAPP_API_VERSION ?? "v19.0";
+    const version       = process.env.WHATSAPP_API_VERSION ?? "v25.0";
 
     const digits = payload.phone.replace(/\D/g, "");
     const to = digits.startsWith("60")
@@ -49,10 +49,10 @@ export async function POST(req: NextRequest) {
               {
                 type: "body",
                 parameters: [
-                  { type: "text", text: payload.customerName },
-                  { type: "text", text: payload.date },
-                  { type: "text", text: payload.time },
-                  { type: "text", text: String(payload.pax) },
+                  { type: "text", parameter_name: "name", text: payload.customerName },
+                  { type: "text", parameter_name: "date", text: payload.date },
+                  { type: "text", parameter_name: "time", text: payload.time },
+                  { type: "text", parameter_name: "pax", text: String(payload.pax) },
                 ],
               },
             ],

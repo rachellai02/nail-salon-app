@@ -92,10 +92,10 @@ export async function GET(req: NextRequest) {
                 {
                   type: "body",
                   parameters: [
-                    { type: "text", text: appt.customer_name },
-                    { type: "text", text: apptDate },
-                    { type: "text", text: apptTime },
-                    { type: "text", text: String(appt.num_persons) },
+                    { type: "text", parameter_name: "name", text: appt.customer_name },
+                    { type: "text", parameter_name: "date", text: apptDate },
+                    { type: "text", parameter_name: "time", text: apptTime },
+                    { type: "text", parameter_name: "pax", text: String(appt.num_persons) },
                   ],
                 },
               ],

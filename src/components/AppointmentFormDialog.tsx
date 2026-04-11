@@ -144,6 +144,35 @@ export function AppointmentFormDialog({
       } else {
         await createAppointment(payload);
         toast.success("Appointment added!");
+
+        // Send immediate reminder if the day-before 10AM window has already passed
+        if (payload.contact_number) {
+          const now = new Date();
+          const apptDateObj = new Date(payload.appointment_date + "T00:00:00");
+          const reminderDeadline = new Date(apptDateObj);
+          reminderDeadline.setDate(reminderDeadline.getDate() - 1);
+          reminderDeadline.setHours(10, 0, 0, 0);
+          const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+          if (now >= reminderDeadline && apptDateObj >= todayStart) {
+            try {
+              const apptDate = format(apptDateObj, "EEEE, d MMMM yyyy");
+              const apptTime = format(parse(data.start_time.slice(0, 5), "HH:mm", new Date()), "h:mm a");
+              const res = await fetch("/api/send-reminder", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  phone: payload.contact_number,
+                  customerName: data.customer_name,
+                  date: apptDate,
+                  time: apptTime,
+                  pax: data.num_persons,
+                }),
+              });
+              if (res.ok) toast.success("Reminder sent via WhatsApp!");
+            } catch { /* ignore reminder failure */ }
+          }
+        }
       }
       reset();
       onClose();
