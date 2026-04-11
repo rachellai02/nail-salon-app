@@ -1,6 +1,52 @@
 "use client";
 
+import { useRef } from "react";
 import { CustomerPackage } from "@/lib/types";
+
+const PRINT_CSS = `
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; background: white; }
+.font-mono { font-family: ui-monospace, 'Courier New', monospace; font-size: 11px; line-height: 1.5; }
+.text-xs { font-size: 11px; line-height: 1.4; }
+.text-sm { font-size: 13px; line-height: 1.4; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.font-bold { font-weight: 700; }
+.font-semibold { font-weight: 600; }
+.font-black { font-weight: 900; }
+.tracking-wide { letter-spacing: 0.05em; }
+.tracking-widest { letter-spacing: 0.25em; }
+.flex { display: flex; align-items: baseline; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.flex-1 { flex: 1 1 0%; min-width: 0; }
+.gap-1 { gap: 4px; }
+.w-6 { width: 24px; min-width: 24px; flex-shrink: 0; }
+.w-16 { width: 64px; min-width: 64px; flex-shrink: 0; }
+.border { border: 1px solid #d1d5db; }
+.border-t { border-top-width: 1px; border-top-style: solid; border-top-color: #d1d5db; }
+.border-dashed { border-style: dashed; }
+.border-gray-300 { border-color: #d1d5db; }
+.rounded-lg { border-radius: 8px; }
+.p-2 { padding: 8px; }
+.p-10 { padding: 40px; }
+.pb-2 { padding-bottom: 8px; }
+.pl-2 { padding-left: 8px; }
+.mt-1 { margin-top: 4px; }
+.space-y-0\\.5 > * + * { margin-top: 2px; }
+.space-y-2 > * + * { margin-top: 8px; }
+.bg-white { background-color: white; }
+.relative { position: relative; }
+.absolute { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+.overflow-hidden { overflow: hidden; }
+.pointer-events-none { pointer-events: none; }
+.select-none { user-select: none; }
+.whitespace-nowrap { white-space: nowrap; }
+.text-red-500 { color: #ef4444; }
+.opacity-25 { opacity: 0.25; }
+@media print { @page { margin: 1cm; size: A5 portrait; } }
+`;
 
 const SHOP_NAME = "PRESTIGE BY CHUSEN";
 const SHOP_REG = "Chusen Beauty 202603063451 (003831067-D)";
@@ -29,6 +75,8 @@ type ReceiptViewProps = {
   extraChangeGiven?: number | null;
   packageDeductions?: { packageName: string; amount: number }[];
   transactionBy?: string;
+  hideDownloadButton?: boolean;
+  pdfTriggerRef?: { current: ((targetWin?: Window) => void) | null };
 };
 
 export function ReceiptView({
@@ -47,12 +95,32 @@ export function ReceiptView({
   extraChangeGiven,
   packageDeductions,
   transactionBy,
+  hideDownloadButton,
+  pdfTriggerRef,
 }: ReceiptViewProps) {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
+  const printRef = useRef<HTMLDivElement>(null);
+
+  function triggerPdf(targetWin?: Window) {
+    if (!printRef.current) return;
+    const html = printRef.current.outerHTML;
+    const win = targetWin ?? window.open("", "_blank", "width=600,height=800");
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <title>Receipt ${receiptNo}</title>
+      <style>${PRINT_CSS}</style>
+    </head><body>${html}<script>window.onload=()=>{window.print();window.onafterprint=()=>window.close();}<\/script></body></html>`);
+    win.document.close();
+  }
+
+  // Expose trigger function to parent via ref
+  if (pdfTriggerRef) pdfTriggerRef.current = triggerPdf;
 
   return (
-    <div className="relative">
+    <div className="space-y-3">
+    <div className="relative" ref={printRef}>
       <div className="font-mono text-xs border rounded-lg p-10 bg-white space-y-2 max-h-[60vh] overflow-y-auto">
       {/* Shop header */}
       <div className="text-center space-y-0.5">
@@ -257,6 +325,17 @@ export function ReceiptView({
         </span>
       </div>
     )}
-  </div>
+    </div>
+
+    {!hideDownloadButton && (
+    <button
+      type="button"
+      onClick={() => triggerPdf()}
+      className="w-full border rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+    >
+      Download PDF
+    </button>
+    )}
+    </div>
   );
 }

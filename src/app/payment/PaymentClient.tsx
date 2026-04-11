@@ -49,15 +49,7 @@ const CART_STORAGE_KEY = "payment_cart";
 const CUSTOMER_STORAGE_KEY = "payment_customer";
 
 export default function PaymentClient({ categories, customers, packages, employees }: Props) {
-  const [cart, setCart] = useState<CartItem[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = sessionStorage.getItem(CART_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as CartItem[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [cart, setCart] = useState<CartItem[]>([]);
 
   useEffect(() => {
     try {
@@ -69,15 +61,7 @@ export default function PaymentClient({ categories, customers, packages, employe
   const [paymentType, setPaymentType] = useState<PaymentType | null>(null);
   // Customer — selected in the main panel before payment
   const [customerQuery, setCustomerQuery] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const saved = sessionStorage.getItem(CUSTOMER_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as Customer) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerPackages, setCustomerPackages] = useState<CustomerPackage[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
 
@@ -134,8 +118,17 @@ export default function PaymentClient({ categories, customers, packages, employe
   const [extraTopupPackage, setExtraTopupPackage] = useState<CustomerPackage | null>(null);
   const [packageDeductions, setPackageDeductions] = useState<{ packageName: string; amount: number }[]>([]);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const savedCart = sessionStorage.getItem(CART_STORAGE_KEY);
+      if (savedCart) setCart(JSON.parse(savedCart) as CartItem[]);
+      const savedCustomer = sessionStorage.getItem(CUSTOMER_STORAGE_KEY);
+      if (savedCustomer) setSelectedCustomer(JSON.parse(savedCustomer) as Customer);
+    } catch { /* ignore */ }
+  }, []);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [sending, setSending] = useState(false);
 
   function addToCart(svc: Service) {
     const key = `${uid}-${counterRef.current++}-${svc.id}`;
@@ -473,6 +466,7 @@ export default function PaymentClient({ categories, customers, packages, employe
 
   async function handleDoSend() {
     const isPackagePayment = packageSoldInFlowRef.current;
+    setSending(true);
     try {
       await createTransaction({
         receipt_no: receiptNo,
@@ -508,10 +502,63 @@ export default function PaymentClient({ categories, customers, packages, employe
     } catch {
       // non-blocking — receipt still saves even if DB write fails
     }
-    const msg = selectedCustomer
-      ? `Receipt saved for ${selectedCustomer.name}.`
-      : "Receipt saved.";
-    toast.success(msg);
+    // Send receipt PDF via WhatsApp if customer has a phone number
+    if (selectedCustomer?.contact_number) {
+      try {
+        const payload = {
+          phone: selectedCustomer.contact_number,
+          customerName: selectedCustomer.name,
+          receiptNo,
+          date: receiptDate,
+          transactionBy: selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined,
+          items: cart.map((item) => ({
+            qty: parseFloat(item.qty) || 1,
+            name: item.service.name,
+            subtotal: (parseFloat(item.qty) || 1) * (parseFloat(item.price) || 0),
+          })),
+          paymentType: isPackagePayment
+            ? `Package Sale - ${extraPaymentType ?? paymentType ?? ""}`
+            : extraPaymentType ? `Package + ${extraPaymentType}` : (paymentType ?? ""),
+          total,
+          cashReceived: paymentType === "Cash" && cashReceived ? parseFloat(cashReceived) : null,
+          changeGiven: paymentType === "Cash" && cashReceived ? Math.max(0, parseFloat(cashReceived) - total) : null,
+          extraPaymentType: extraPaymentType ?? undefined,
+          extraTotal: (extraCartItems.length > 0 || extraCreditTopup !== null) ? extraTotal : undefined,
+          extraCashReceived: extraPaymentType === "Cash" && extraCashReceived ? parseFloat(extraCashReceived) : undefined,
+          extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
+          packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
+          customerPackages: customerPackages.length > 0 ? customerPackages.map((cp) => ({
+            name: cp.package?.name ?? "Package",
+            packageType: cp.package?.package_type ?? "services",
+            remainingCredits: cp.remaining_credits ?? undefined,
+            items: cp.items?.map((i) => ({
+              service_name: i.service_name,
+              remaining_uses: i.remaining_uses,
+              total_uses: i.total_uses,
+            })),
+            customerCode: cp.customer?.customer_code,
+            customerName: cp.customer?.name,
+            customerPhone: cp.customer?.contact_number,
+          })) : undefined,
+        };
+        const res = await fetch("/api/send-receipt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const { error } = await res.json() as { error: string };
+          toast.error(`Receipt saved, but WhatsApp send failed: ${error}`);
+        } else {
+          toast.success(`Receipt sent to ${selectedCustomer.name} via WhatsApp.`);
+        }
+      } catch {
+        toast.error("Receipt saved, but WhatsApp send failed.");
+      }
+    } else {
+      toast.success("Receipt saved.");
+    }
+    setSending(false);
     setDialogOpen(false);
     setSelectedCustomer(null);
     clearCart();
@@ -1199,10 +1246,15 @@ export default function PaymentClient({ categories, customers, packages, employe
                 customerPackages={customerPackages.length > 0 ? customerPackages : undefined}
                 packageDeductions={packageDeductions.length > 0 ? packageDeductions : undefined}
                 transactionBy={selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined}
+                hideDownloadButton={true}
               />
 
-              <Button className="w-full" onClick={handleDoSend}>
-                {selectedCustomer ? `Save & Send to ${selectedCustomer.name}` : "Save Receipt"}
+              <Button className="w-full" disabled={sending} onClick={handleDoSend}>
+                {sending
+                  ? "Sending…"
+                  : selectedCustomer?.contact_number
+                  ? "Save & Send via WhatsApp"
+                  : "Save Receipt"}
               </Button>
             </>
           )}

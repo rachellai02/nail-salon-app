@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { format, parse } from "date-fns";
 import { useForm, Controller, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { format } from "date-fns";
 import { toast } from "sonner";
 import { CalendarIcon, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -96,6 +96,7 @@ export function AppointmentFormDialog({
   );
   const [loading,  setLoading]  = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sending,  setSending]  = useState(false);
 
   const defaultStart = editingAppointment
     ? editingAppointment.start_time.slice(0, 5)
@@ -371,6 +372,46 @@ export function AppointmentFormDialog({
               >
                 <Trash2 className="h-4 w-4 mr-1" />
                 {deleting ? "Deleting…" : "Delete"}
+              </Button>
+            )}
+            {isEditing && editingAppointment?.contact_number && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={sending}
+                onClick={async () => {
+                  setSending(true);
+                  try {
+                    const apptDate = format(
+                      new Date(editingAppointment.appointment_date + "T00:00:00"),
+                      "EEEE, d MMMM yyyy"
+                    );
+                    const apptTime = format(
+                      parse(editingAppointment.start_time.slice(0, 5), "HH:mm", new Date()),
+                      "h:mm a"
+                    );
+                    const res = await fetch("/api/send-reminder", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        phone: editingAppointment.contact_number,
+                        customerName: editingAppointment.customer_name,
+                        date: apptDate,
+                        time: apptTime,
+                        pax: editingAppointment.num_persons,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error ?? "Failed to send");
+                    toast.success("Reminder sent via WhatsApp!");
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Failed to send reminder");
+                  } finally {
+                    setSending(false);
+                  }
+                }}
+              >
+                {sending ? "Sending…" : "Send Reminder"}
               </Button>
             )}
             <Button type="button" variant="outline" onClick={handleClose}>
