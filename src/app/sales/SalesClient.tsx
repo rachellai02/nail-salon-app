@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Transaction, CustomerPackage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ReceiptView } from "@/components/ReceiptView";
-import { voidTransaction, deleteTransaction } from "@/lib/actions";
+import { voidTransaction, deleteTransaction, getTransactionContributors } from "@/lib/actions";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Receipt, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Receipt, Trash2, Users } from "lucide-react";
 import SalesSummaryClient from "./SalesSummaryClient";
+import EmployeeSplitDialog from "@/components/EmployeeSplitDialog";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -64,8 +65,35 @@ export default function SalesClient({ transactions, year, month, summaryTransact
   const [voiding, setVoiding] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [splitTx, setSplitTx] = useState<Transaction | null>(null);
+  const [splitContributors, setSplitContributors] = useState<Record<string, { employee_id: string; display: string }[]>>({});
 
   const isPackageSale = (tx: Transaction) => tx.payment_type?.trim().toLowerCase().startsWith("package sale");
+
+  // Load split contributors (non-001 employees who entered their part) for the selected day
+  useEffect(() => {
+    if (!selectedDate) return;
+    const ids = transactions
+      .filter((tx) => {
+        if (tx.is_voided || isPackageSale(tx)) return false;
+        return new Date(tx.transacted_at).toLocaleDateString("en-CA") === selectedDate;
+      })
+      .map((tx) => tx.id);
+    if (!ids.length) return;
+    void getTransactionContributors(ids).then((rows) => {
+      setSplitContributors((prev) => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = [];
+        for (const row of rows) {
+          if (row.employee_code === 1) continue; // emp001 is default owner, no badge
+          if (!next[row.transaction_id]) next[row.transaction_id] = [];
+          next[row.transaction_id].push({ employee_id: row.employee_id, display: row.display });
+        }
+        return next;
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate]);
 
   // Group totals by date string "yyyy-MM-dd" (exclude voided and package sales)
   const totalsByDate = useMemo<Record<string, number>>(() => {
@@ -284,8 +312,29 @@ export default function SalesClient({ transactions, year, month, summaryTransact
                               <td className={`px-5 py-3 text-right font-semibold ${tx.is_voided ? "line-through text-gray-400" : ""}`}>
                                 {Number(tx.total).toFixed(2)}
                               </td>
-                              <td className="px-5 py-3 text-right">
-                                <div className="flex items-center justify-end gap-6">
+                              <td className="px-5 py-3">
+                                <div className="flex items-center justify-end gap-3">
+                                  {/* Nickname badges for non-001 contributors + icon to open dialog */}
+                                  <div className="flex items-center gap-1 flex-wrap justify-end">
+                                    {(splitContributors[tx.id] ?? []).map((c) => (
+                                      <button
+                                        key={c.employee_id}
+                                        type="button"
+                                        onClick={() => setSplitTx(tx)}
+                                        className="text-xs bg-indigo-50 text-indigo-600 rounded px-1.5 py-0.5 hover:bg-indigo-100 transition-colors"
+                                      >
+                                        {c.display}
+                                      </button>
+                                    ))}
+                                    <button
+                                      type="button"
+                                      onClick={() => setSplitTx(tx)}
+                                      title="Employee splits"
+                                      className="text-gray-300 hover:text-gray-500 transition-colors"
+                                    >
+                                      <Users size={13} />
+                                    </button>
+                                  </div>
                                   <button type="button" onClick={() => void openReceipt(tx)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors">
                                     <Receipt size={14} /> Receipt
                                   </button>
@@ -511,6 +560,7 @@ export default function SalesClient({ transactions, year, month, summaryTransact
                 extraCashReceived={receiptTx.receipt_snapshot?.extraCashReceived}
                 extraChangeGiven={receiptTx.receipt_snapshot?.extraChangeGiven}
                 packageDeductions={receiptTx.receipt_snapshot?.packageDeductions}
+                transactionBy={receiptTx.receipt_snapshot?.transactionBy}
               />
               {receiptTx.is_voided && (
                 <Button
@@ -530,6 +580,21 @@ export default function SalesClient({ transactions, year, month, summaryTransact
         </DialogContent>
       </Dialog>
         </>
+      )}
+
+      {/* Employee split dialog */}
+      {splitTx && (
+        <EmployeeSplitDialog
+          open={!!splitTx}
+          onOpenChange={(v) => { if (!v) setSplitTx(null); }}
+          transactionId={splitTx.id}
+          transactionTotal={Number(splitTx.total)}
+          receiptNo={splitTx.receipt_no}
+          onSaved={(contributors) => {
+            const id = splitTx.id;
+            setSplitContributors((prev) => ({ ...prev, [id]: contributors }));
+          }}
+        />
       )}
     </div>
   );

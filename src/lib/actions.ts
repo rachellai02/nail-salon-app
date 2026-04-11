@@ -20,6 +20,7 @@ import {
   ArchivedTransaction,
   ReceiptSnapshot,
   Employee,
+  EmployeeSplit,
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
@@ -1984,4 +1985,127 @@ export async function deleteEmployee(id: string): Promise<void> {
     .eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/employees");
+}
+
+// -------------------------------------------------------
+// EMPLOYEE SPLIT ACTIONS
+// -------------------------------------------------------
+
+export async function getEmployeeSplits(transactionId: string): Promise<EmployeeSplit[]> {
+  if (!transactionId || !UUID_REGEX.test(transactionId)) return [];
+  const { data, error } = await supabase
+    .from("transaction_employee_splits")
+    .select("*")
+    .eq("transaction_id", transactionId);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function upsertEmployeeSplits(
+  transactionId: string,
+  splits: { employee_id: string; amount: number }[]
+): Promise<void> {
+  if (!transactionId || !UUID_REGEX.test(transactionId)) throw new Error("Invalid transaction ID");
+
+  // Delete all existing splits for this transaction
+  const { error: delError } = await supabase
+    .from("transaction_employee_splits")
+    .delete()
+    .eq("transaction_id", transactionId);
+  if (delError) throw new Error(delError.message);
+
+  // Insert non-zero splits
+  const rows = splits.filter((s) => s.amount > 0).map((s) => ({
+    transaction_id: transactionId,
+    employee_id: s.employee_id,
+    amount: s.amount,
+  }));
+
+  if (rows.length > 0) {
+    const { error: insError } = await supabase
+      .from("transaction_employee_splits")
+      .insert(rows);
+    if (insError) throw new Error(insError.message);
+  }
+
+  revalidatePath("/sales");
+}
+
+export async function getTransactionSplitSums(
+  transactionIds: string[]
+): Promise<{ transaction_id: string; sum: number }[]> {
+  if (!transactionIds.length) return [];
+  const validIds = transactionIds.filter((id) => UUID_REGEX.test(id));
+  if (!validIds.length) return [];
+
+  const { data, error } = await supabase
+    .from("transaction_employee_splits")
+    .select("transaction_id, amount")
+    .in("transaction_id", validIds);
+  if (error) throw new Error(error.message);
+
+  const map = new Map<string, number>();
+  for (const row of data ?? []) {
+    map.set(row.transaction_id, (map.get(row.transaction_id) ?? 0) + Number(row.amount));
+  }
+  return Array.from(map.entries()).map(([transaction_id, sum]) => ({ transaction_id, sum }));
+}
+
+export async function getTransactionContributors(
+  transactionIds: string[]
+): Promise<{ transaction_id: string; employee_id: string; employee_code: number; display: string }[]> {
+  if (!transactionIds.length) return [];
+  const validIds = transactionIds.filter((id) => UUID_REGEX.test(id));
+  if (!validIds.length) return [];
+
+  const { data, error } = await supabase
+    .from("transaction_employee_splits")
+    .select("transaction_id, employee_id, amount, employees(name, nickname, employee_code)")
+    .in("transaction_id", validIds);
+  if (error) throw new Error(error.message);
+
+  return (data ?? [])
+    .filter((row) => Number(row.amount) > 0)
+    .map((row) => {
+      const emp = (Array.isArray(row.employees) ? row.employees[0] : row.employees) as { name: string; nickname: string | null; employee_code: number } | null;
+      return {
+        transaction_id: row.transaction_id,
+        employee_id: row.employee_id,
+        employee_code: emp?.employee_code ?? 0,
+        display: emp?.nickname ?? emp?.name ?? "Unknown",
+      };
+    });
+}
+
+export async function getEmployeeSplitTransactions(
+  employeeId: string
+): Promise<{ transacted_at: string; total: number }[]> {
+  if (!employeeId || !UUID_REGEX.test(employeeId)) return [];
+
+  // Step 1: get all non-zero splits for this employee
+  const { data: splits, error: splitError } = await supabase
+    .from("transaction_employee_splits")
+    .select("transaction_id, amount")
+    .eq("employee_id", employeeId)
+    .gt("amount", 0);
+
+  if (splitError) throw new Error(splitError.message);
+  if (!splits || splits.length === 0) return [];
+
+  const txIds = splits.map((s) => s.transaction_id);
+
+  // Step 2: fetch those transactions (non-voided only)
+  const { data: txs, error: txError } = await supabase
+    .from("sales_transactions")
+    .select("id, transacted_at, is_voided")
+    .in("id", txIds)
+    .eq("is_voided", false);
+
+  if (txError) throw new Error(txError.message);
+
+  const txMap = new Map((txs ?? []).map((t) => [t.id, t.transacted_at]));
+
+  return splits
+    .filter((s) => txMap.has(s.transaction_id))
+    .map((s) => ({ transacted_at: txMap.get(s.transaction_id)!, total: Number(s.amount) }));
 }

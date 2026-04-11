@@ -1,4 +1,4 @@
-import { getEmployeeById } from "@/lib/actions";
+import { getEmployeeById, getEmployeeSplitTransactions } from "@/lib/actions";
 import { notFound } from "next/navigation";
 import EmployeeDetailClient from "./EmployeeDetailClient";
 
@@ -10,5 +10,6 @@ export default async function EmployeeDetailPage({
   const { employeeId } = await params;
   const employee = await getEmployeeById(employeeId);
   if (!employee) notFound();
-  return <EmployeeDetailClient employee={employee} />;
+  const salesTransactions = await getEmployeeSplitTransactions(employee.id);
+  return <EmployeeDetailClient employee={employee} salesTransactions={salesTransactions} />;
 }

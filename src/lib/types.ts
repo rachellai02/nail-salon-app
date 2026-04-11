@@ -171,6 +171,7 @@ export type ReceiptSnapshot = {
   extraCashReceived?: number | null;
   extraChangeGiven?: number | null;
   packageDeductions?: { packageName: string; amount: number }[];
+  transactionBy?: string;
 };
 
 export type Transaction = {
@@ -216,3 +217,13 @@ export type Employee = {
   is_active: boolean;
   created_at: string;
 };
+
+export type EmployeeSplit = {
+  id?: string;
+  transaction_id: string;
+  employee_id: string;
+  amount: number;
+  created_at?: string;
+};
+
+export type SplitStatus = "complete" | "partial" | "none";

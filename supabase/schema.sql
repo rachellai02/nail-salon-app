@@ -449,3 +449,13 @@ CREATE TABLE IF NOT EXISTS employees (
   phone_number  TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Step N+5: Create transaction_employee_splits table
+CREATE TABLE IF NOT EXISTS transaction_employee_splits (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  transaction_id UUID NOT NULL REFERENCES sales_transactions(id) ON DELETE CASCADE,
+  employee_id    UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  amount         NUMERIC(10,2) NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(transaction_id, employee_id)
+);

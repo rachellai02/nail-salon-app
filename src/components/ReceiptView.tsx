@@ -28,6 +28,7 @@ type ReceiptViewProps = {
   extraCashReceived?: number | null;
   extraChangeGiven?: number | null;
   packageDeductions?: { packageName: string; amount: number }[];
+  transactionBy?: string;
 };
 
 export function ReceiptView({
@@ -45,6 +46,7 @@ export function ReceiptView({
   extraCashReceived,
   extraChangeGiven,
   packageDeductions,
+  transactionBy,
 }: ReceiptViewProps) {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
@@ -66,7 +68,7 @@ export function ReceiptView({
       <div className="space-y-0.5 pb-2">
         <p>Receipt No: {receiptNo}</p>
         <p>Date: {date}</p>
-        <p>Transaction By: xxx</p>
+        <p>Transaction By: {transactionBy ?? "—"}</p>
       </div>
 
       <div className="border-t border-dashed border-gray-300" />

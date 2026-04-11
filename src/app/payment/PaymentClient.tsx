@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useId, useRef } from "react";
-import { ServiceCategory, Service, Customer, CustomerPackage, Package } from "@/lib/types";
+import { ServiceCategory, Service, Customer, CustomerPackage, Package, Employee } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,12 +42,13 @@ type Props = {
   categories: ServiceCategory[];
   customers: Customer[];
   packages: Package[];
+  employees: Employee[];
 };
 
 const CART_STORAGE_KEY = "payment_cart";
 const CUSTOMER_STORAGE_KEY = "payment_customer";
 
-export default function PaymentClient({ categories, customers, packages }: Props) {
+export default function PaymentClient({ categories, customers, packages, employees }: Props) {
   const [cart, setCart] = useState<CartItem[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -134,6 +135,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
   const [packageDeductions, setPackageDeductions] = useState<{ packageName: string; amount: number }[]>([]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
 
   function addToCart(svc: Service) {
     const key = `${uid}-${counterRef.current++}-${svc.id}`;
@@ -500,6 +502,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
           extraCashReceived: extraPaymentType === "Cash" && extraCashReceived ? parseFloat(extraCashReceived) : undefined,
           extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
           packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
+          transactionBy: selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined,
         },
       });
     } catch {
@@ -557,9 +560,9 @@ export default function PaymentClient({ categories, customers, packages }: Props
         {categories.length === 0 && (
           <p className="text-gray-400 text-sm">No services configured yet.</p>
         )}
-        {mounted && !selectedCustomer && (
+        {mounted && (!selectedEmployee || !selectedCustomer) && (
           <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            Select a customer before adding services.
+            Select a collected-by employee and a customer before adding services.
           </p>
         )}
         {categories.map((cat) => (
@@ -575,7 +578,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
                   <button
                     key={svc.id}
                     type="button"
-                    disabled={mounted && !selectedCustomer}
+                    disabled={mounted && (!selectedEmployee || !selectedCustomer)}
                     onClick={() => addToCart(svc)}
                     className="flex items-center justify-between gap-4 border rounded-lg px-4 py-2 text-sm transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-gray-400 hover:enabled:bg-gray-50 active:enabled:bg-gray-100"
                   >
@@ -605,6 +608,28 @@ export default function PaymentClient({ categories, customers, packages }: Props
               Clear all
             </button>
           )}
+        </div>
+
+        {/* Employee selector */}
+        <div className="px-6 py-3 border-b space-y-2">
+          <p className="text-sm font-semibold text-gray-700">Collected By</p>
+          <select
+            value={selectedEmployee?.id ?? ""}
+            onChange={(e) => {
+              const emp = employees.find((emp) => emp.id === e.target.value) ?? null;
+              setSelectedEmployee(emp);
+            }}
+            className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-gray-400"
+          >
+            <option value="">— Select employee —</option>
+            {employees
+              .filter((emp) => emp.is_active)
+              .map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.nickname ?? emp.name}
+                </option>
+              ))}
+          </select>
         </div>
 
         {/* Customer selector + active packages */}
@@ -1173,6 +1198,7 @@ export default function PaymentClient({ categories, customers, packages }: Props
                 }
                 customerPackages={customerPackages.length > 0 ? customerPackages : undefined}
                 packageDeductions={packageDeductions.length > 0 ? packageDeductions : undefined}
+                transactionBy={selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined}
               />
 
               <Button className="w-full" onClick={handleDoSend}>
