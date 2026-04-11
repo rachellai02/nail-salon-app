@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import path from "path";
+import fs from "fs";
 
 export const maxDuration = 60;
 
@@ -48,7 +50,7 @@ const SHOP_ADDR = "5M, Jalan Delima, Island Glades, 11700 Gelugor, Penang.";
 
 const RECEIPT_CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 32px; background: white; color: #000; }
+body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 20px; background: white; color: #000; }
 .center { text-align: center; }
 .right { text-align: right; }
 .bold { font-weight: 700; }
@@ -58,7 +60,7 @@ body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 11px; 
 .qty { width: 24px; flex-shrink: 0; }
 .amount { width: 64px; flex-shrink: 0; text-align: right; }
 .space-between { display: flex; justify-content: space-between; }
-.divider { border-top: 1px dashed #9ca3af; margin: 6px 0; }
+.divider { border-top: 1px dashed #9ca3af; margin: 8px 0; }
 .mb-1 { margin-bottom: 4px; }
 .mt-1 { margin-top: 4px; }
 .mb-2 { margin-bottom: 8px; }
@@ -79,6 +81,16 @@ function escHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function getLogoDataUrl(): string {
+  try {
+    const logoPath = path.join(process.cwd(), "public", "chusen-logo.jpeg");
+    const logoBuffer = fs.readFileSync(logoPath);
+    return `data:image/jpeg;base64,${logoBuffer.toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
+
 function buildReceiptHtml(data: SendReceiptPayload): string {
   const {
     receiptNo, date, items, paymentType, total, cashReceived, changeGiven,
@@ -88,6 +100,7 @@ function buildReceiptHtml(data: SendReceiptPayload): string {
 
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
+  const logoDataUrl = getLogoDataUrl();
 
   const itemsHtml = items.map(item => `
     <div class="row">
@@ -191,6 +204,7 @@ function buildReceiptHtml(data: SendReceiptPayload): string {
 </head>
 <body>
   <div class="center mb-2">
+    ${logoDataUrl ? `<img src="${logoDataUrl}" style="width:150px;height:150px;object-fit:contain;margin:-20px auto -15px;display:block;" />` : ""}
     <p class="bold large">${escHtml(SHOP_NAME)}</p>
     <p>${escHtml(SHOP_REG)}</p>
     <p>${escHtml(SHOP_TEL)}</p>

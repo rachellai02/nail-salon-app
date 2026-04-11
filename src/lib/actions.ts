@@ -1762,6 +1762,14 @@ export async function createTransaction(input: {
   return data;
 }
 
+export async function getNextReceiptNo(): Promise<string> {
+  const { count, error } = await supabase
+    .from("sales_transactions")
+    .select("*", { count: "exact", head: true });
+  if (error) throw new Error(error.message);
+  return String(11111110 + (count ?? 0) + 1);
+}
+
 export async function getTransactionsByMonth(year: number, month: number): Promise<Transaction[]> {
   // month is 1-based; use +08:00 offset so boundaries match Malaysia local midnight
   const pad = (n: number) => String(n).padStart(2, "0");

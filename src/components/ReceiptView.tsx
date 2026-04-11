@@ -30,6 +30,7 @@ body { margin: 0; padding: 0; background: white; }
 .border-gray-300 { border-color: #d1d5db; }
 .rounded-lg { border-radius: 8px; }
 .p-2 { padding: 8px; }
+.my-2 { margin-top: 8px; margin-bottom: 8px; }
 .p-10 { padding: 40px; }
 .pb-2 { padding-bottom: 8px; }
 .pl-2 { padding-left: 8px; }
@@ -45,7 +46,7 @@ body { margin: 0; padding: 0; background: white; }
 .whitespace-nowrap { white-space: nowrap; }
 .text-red-500 { color: #ef4444; }
 .opacity-25 { opacity: 0.25; }
-@media print { @page { margin: 1cm; size: A5 portrait; } }
+@media print { @page { margin: 1cm; size: A5 portrait; } .border { border: none !important; } .rounded-lg { border-radius: 0 !important; } }
 `;
 
 const SHOP_NAME = "PRESTIGE BY CHUSEN";
@@ -121,9 +122,11 @@ export function ReceiptView({
   return (
     <div className="space-y-3">
     <div className="relative" ref={printRef}>
-      <div className="font-mono text-xs border rounded-lg p-10 bg-white space-y-2 max-h-[60vh] overflow-y-auto">
+      <div className="font-mono text-xs border rounded-lg p-5 bg-white space-y-2 max-h-[60vh] overflow-y-auto">
       {/* Shop header */}
       <div className="text-center space-y-0.5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/chusen-logo.jpeg" alt="Chusen Logo" style={{ width: 150, height: 150, objectFit: "contain", margin: "-20px auto -15px" }} />
         <p className="font-bold text-sm tracking-wide">{SHOP_NAME}</p>
         <p>{SHOP_REG}</p>
         <p>{SHOP_TEL}</p>
@@ -131,7 +134,7 @@ export function ReceiptView({
         <p>{addrParts.slice(2).join(",").trim()}</p>
       </div>
 
-      <div className="border-t border-dashed border-gray-300 p-2" />
+      <div className="border-t border-dashed border-gray-300 my-2" />
 
       <div className="space-y-0.5 pb-2">
         <p>Receipt No: {receiptNo}</p>

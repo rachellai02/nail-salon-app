@@ -15,7 +15,7 @@ import { CustomerFormDialog } from "@/components/CustomerFormDialog";
 import { ReceiptView } from "@/components/ReceiptView";
 import { SellPackageDialog } from "@/components/SellPackageDialog";
 import { DeductUseDialog } from "@/components/DeductUseDialog";
-import { createTransaction, getPackagesByCustomerId } from "@/lib/actions";
+import { createTransaction, getPackagesByCustomerId, getNextReceiptNo } from "@/lib/actions";
 import { X, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -179,36 +179,34 @@ export default function PaymentClient({ categories, customers, packages, employe
     setDialogOpen(true);
   }
 
-  function generateReceiptNo(): string {
+  async function fetchReceiptNo(): Promise<string> {
     try {
-      const stored = localStorage.getItem("receipt_counter");
-      const current = stored ? parseInt(stored, 10) : 11111110;
-      const next = current + 1;
-      localStorage.setItem("receipt_counter", String(next));
-      return String(next);
+      return await getNextReceiptNo();
     } catch {
-      return "11111111";
+      return String(Date.now());
     }
   }
 
-  function handlePay() {
+  function currentReceiptDate(): string {
+    return new Date().toLocaleString("en-MY", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  async function handlePay() {
     if (paymentType === "Cash") {
       setCashReceived("");
       setDialogStep("cash-entry");
     } else if (paymentType === "Package") {
       setDialogStep("package-deduct");
     } else {
-      setReceiptNo(generateReceiptNo());
-      setReceiptDate(
-        new Date().toLocaleString("en-MY", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-        })
-      );
+      setReceiptNo(await fetchReceiptNo());
+      setReceiptDate(currentReceiptDate());
       setDialogStep("success");
     }
   }
@@ -251,17 +249,8 @@ export default function PaymentClient({ categories, customers, packages, employe
           }
           // Shortfall fully covered → success
           setExtraCreditTopup(null);
-          setReceiptNo(generateReceiptNo());
-          setReceiptDate(
-            new Date().toLocaleString("en-MY", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-            })
-          );
+          setReceiptNo(await fetchReceiptNo());
+          setReceiptDate(currentReceiptDate());
           setDialogStep("success");
           return;
         }
@@ -286,17 +275,8 @@ export default function PaymentClient({ categories, customers, packages, employe
           setExtraCashReceived("");
           setDialogStep("extra-payment");
         } else {
-          setReceiptNo(generateReceiptNo());
-          setReceiptDate(
-            new Date().toLocaleString("en-MY", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-            })
-          );
+          setReceiptNo(await fetchReceiptNo());
+          setReceiptDate(currentReceiptDate());
           setDialogStep("success");
         }
         return;
@@ -321,23 +301,14 @@ export default function PaymentClient({ categories, customers, packages, employe
         setExtraCashReceived("");
         setDialogStep("extra-payment");
       } else {
-        setReceiptNo(generateReceiptNo());
-        setReceiptDate(
-          new Date().toLocaleString("en-MY", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
-          })
-        );
+        setReceiptNo(await fetchReceiptNo());
+        setReceiptDate(currentReceiptDate());
         setDialogStep("success");
       }
     }
   }
 
-  function handlePackageDeductDone() {
+  async function handlePackageDeductDone() {
     // Detect cart items whose service name was not deducted from any package
     const deductedSet = new Set(deductedServiceNames);
     const extras = cart.filter((item) => !deductedSet.has(item.service.name));
@@ -347,48 +318,21 @@ export default function PaymentClient({ categories, customers, packages, employe
       setExtraCashReceived("");
       setDialogStep("extra-payment");
     } else {
-      setReceiptNo(generateReceiptNo());
-      setReceiptDate(
-        new Date().toLocaleString("en-MY", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-        })
-      );
+      setReceiptNo(await fetchReceiptNo());
+      setReceiptDate(currentReceiptDate());
       setDialogStep("success");
     }
   }
 
-  function handleExtraPaymentConfirm() {
-    setReceiptNo(generateReceiptNo());
-    setReceiptDate(
-      new Date().toLocaleString("en-MY", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    );
+  async function handleExtraPaymentConfirm() {
+    setReceiptNo(await fetchReceiptNo());
+    setReceiptDate(currentReceiptDate());
     setDialogStep("success");
   }
 
-  function handleCashConfirm() {
-    setReceiptNo(generateReceiptNo());
-    setReceiptDate(
-      new Date().toLocaleString("en-MY", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    );
+  async function handleCashConfirm() {
+    setReceiptNo(await fetchReceiptNo());
+    setReceiptDate(currentReceiptDate());
     setDialogStep("success");
   }
 
