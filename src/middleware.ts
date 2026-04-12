@@ -14,6 +14,8 @@ export async function middleware(request: NextRequest) {
   if (
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/whatsapp/") ||
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/keepalive") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico"
   ) {
