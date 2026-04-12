@@ -159,6 +159,12 @@ export default function PaymentClient({ categories, customers, packages, employe
     );
   }
 
+  function updateServiceName(key: string, name: string) {
+    setCart((prev) =>
+      prev.map((item) => (item.key === key ? { ...item, service: { ...item.service, name } } : item))
+    );
+  }
+
   function clearCart() {
     setCart([]);
     try { sessionStorage.removeItem(CART_STORAGE_KEY); } catch { /* ignore */ }
@@ -587,6 +593,7 @@ export default function PaymentClient({ categories, customers, packages, employe
   const totalQty = cart.reduce((sum, item) => sum + (parseInt(item.qty) || 0), 0);
 
   const hasEmptyPrice = cart.some((item) => item.price.trim() === "" || isNaN(parseFloat(item.price)));
+  const hasEmptyName = cart.some((item) => item.service.name.trim() === "");
 
   // Determine if cart currently contains package-sale items or regular service items
   const cartHasPackageSale = cart.some((item) => packages.some((p) => p.name === item.service.name && p.is_active));
@@ -627,7 +634,7 @@ export default function PaymentClient({ categories, customers, packages, employe
                     onClick={() => addToCart(svc)}
                     className="flex items-center justify-between gap-4 border rounded-lg px-4 py-2 text-sm transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-gray-400 hover:enabled:bg-gray-50 active:enabled:bg-gray-100"
                   >
-                    <span className="font-medium">{svc.name}</span>
+                    <span className="font-medium">{svc.name || "To be filled"}</span>
                     <span className="text-gray-500 whitespace-nowrap">
                       {svc.price != null ? svc.price.toFixed(2) : "Set at payment"}
                     </span>
@@ -785,7 +792,16 @@ export default function PaymentClient({ categories, customers, packages, employe
               {cart.map((item) => (
                 <div key={item.key} className="flex items-center gap-3">
                   {/* Service name */}
-                  <span className="flex-1 text-sm truncate">{item.service.name}</span>
+                  {item.service.name === "" ? (
+                    <Input
+                      placeholder="To be filled"
+                      value={item.service.name}
+                      onChange={(e) => updateServiceName(item.key, e.target.value)}
+                      className="flex-1 text-sm border-amber-400 focus-visible:border-amber-400"
+                    />
+                  ) : (
+                    <span className="flex-1 text-sm truncate">{item.service.name}</span>
+                  )}
                   {/* Qty input */}
                   <Input
                     type="number"
@@ -822,14 +838,17 @@ export default function PaymentClient({ categories, customers, packages, employe
         {/* Total footer */}
         {cart.length > 0 && (
           <div className="border-t px-6 py-4 space-y-3">
-            {hasEmptyPrice && (
+            {hasEmptyName && (
+              <p className="text-xs text-amber-600">Some service names are not filled in.</p>
+            )}
+            {hasEmptyPrice && !hasEmptyName && (
               <p className="text-xs text-amber-600">Some prices are not filled in.</p>
             )}
             <div className="flex items-center justify-between">
               <span className="text-base font-semibold">Total</span>
               <span className="text-xl font-bold">{total.toFixed(2)}</span>
             </div>
-            <Button className="w-full" disabled={hasEmptyPrice} onClick={openPaymentDialog}>
+            <Button className="w-full" disabled={hasEmptyPrice || hasEmptyName} onClick={openPaymentDialog}>
               Create Payment
             </Button>
           </div>

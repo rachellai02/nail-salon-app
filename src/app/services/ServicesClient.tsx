@@ -140,7 +140,6 @@ export default function ServicesClient({ initialCategories }: Props) {
   }
 
   async function handleSaveSvc() {
-    if (!svcName.trim()) return;
     const price = svcPrice !== "" ? parseFloat(svcPrice) : null;
     setSvcLoading(true);
     try {
@@ -370,7 +369,7 @@ export default function ServicesClient({ initialCategories }: Props) {
                         </div>
                       </TableCell>
                     )}
-                    <TableCell className="text-sm">{svc.name}</TableCell>
+                    <TableCell className="text-sm">{svc.name || <span className="text-gray-400 italic">To be filled</span>}</TableCell>
                     <TableCell className="text-sm">
                       {svc.price != null ? svc.price.toFixed(2) : <span className="text-gray-400 text-xs">N/A</span>}
                     </TableCell>
@@ -436,7 +435,7 @@ export default function ServicesClient({ initialCategories }: Props) {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="svc-name">Service Name <span className="text-red-500">*</span></Label>
+              <Label htmlFor="svc-name">Service Name <span className="text-gray-400 font-normal text-xs">(optional — can be filled at payment)</span></Label>
               <Input
                 id="svc-name"
                 placeholder="e.g. Gel Manicure"
@@ -459,7 +458,7 @@ export default function ServicesClient({ initialCategories }: Props) {
           </div>
           <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setSvcDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveSvc} disabled={svcLoading || !svcName.trim()}>
+            <Button onClick={handleSaveSvc} disabled={svcLoading}>
               {svcLoading ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
