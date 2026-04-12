@@ -50,7 +50,7 @@ const SHOP_ADDR = "5M, Jalan Delima, Island Glades, 11700 Gelugor, Penang.";
 
 const RECEIPT_CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 20px; background: white; color: #000; }
+body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 15px; line-height: 1.6; padding: 20px; background: white; color: #000; }
 .center { text-align: center; }
 .right { text-align: right; }
 .bold { font-weight: 700; }
@@ -66,7 +66,7 @@ body { font-family: 'Courier Prime', 'Courier New', monospace; font-size: 11px; 
 .mb-2 { margin-bottom: 8px; }
 .mt-2 { margin-top: 8px; }
 .pl-2 { padding-left: 8px; }
-.large { font-size: 13px; }
+.large { font-size: 17px; }
 @page { size: A5 portrait; margin: 1cm; }
 `;
 

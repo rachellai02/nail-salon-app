@@ -34,9 +34,10 @@ type Props = {
   onSuccess?: () => void;
   onCreated?: (customer: Customer) => void;
   editingCustomer?: Customer | null;
+  initialPhone?: string;
 };
 
-export function CustomerFormDialog({ open, onClose, onSuccess, onCreated, editingCustomer }: Props) {
+export function CustomerFormDialog({ open, onClose, onSuccess, onCreated, editingCustomer, initialPhone }: Props) {
   const [loading, setLoading] = useState(false);
   const isEditing = !!editingCustomer;
   const nameTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -75,12 +76,12 @@ export function CustomerFormDialog({ open, onClose, onSuccess, onCreated, editin
     } else {
       reset({
         name: "",
-        contact_number: "",
+        contact_number: initialPhone ?? "",
         birthday: "",
       });
     }
 
-  }, [editingCustomer, reset]);
+  }, [editingCustomer, initialPhone, reset]);
 
   useEffect(() => {
     if (!open || !nameTextareaRef.current) return;

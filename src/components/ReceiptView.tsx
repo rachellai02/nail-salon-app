@@ -6,9 +6,9 @@ import { CustomerPackage } from "@/lib/types";
 const PRINT_CSS = `
 * { box-sizing: border-box; }
 body { margin: 0; padding: 0; background: white; }
-.font-mono { font-family: ui-monospace, 'Courier New', monospace; font-size: 11px; line-height: 1.5; }
-.text-xs { font-size: 11px; line-height: 1.4; }
-.text-sm { font-size: 13px; line-height: 1.4; }
+.font-mono { font-family: ui-monospace, 'Courier New', monospace; font-size: 15px; line-height: 1.5; }
+.text-xs { font-size: 15px; line-height: 1.4; }
+.text-sm { font-size: 17px; line-height: 1.4; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
 .font-bold { font-weight: 700; }
@@ -122,12 +122,12 @@ export function ReceiptView({
   return (
     <div className="space-y-3">
     <div className="relative" ref={printRef}>
-      <div className="font-mono text-xs border rounded-lg p-5 bg-white space-y-2 max-h-[60vh] overflow-y-auto">
+      <div className="font-mono border rounded-lg p-5 bg-white space-y-2 max-h-[60vh] overflow-y-auto" style={{ fontSize: 15 }}>
       {/* Shop header */}
       <div className="text-center space-y-0.5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/chusen-logo.jpeg" alt="Chusen Logo" style={{ width: 150, height: 150, objectFit: "contain", margin: "-20px auto -15px" }} />
-        <p className="font-bold text-sm tracking-wide">{SHOP_NAME}</p>
+        <p className="font-bold tracking-wide" style={{ fontSize: 17 }}>{SHOP_NAME}</p>
         <p>{SHOP_REG}</p>
         <p>{SHOP_TEL}</p>
         <p>{addrParts.slice(0, 2).join(",")},</p>
@@ -171,7 +171,7 @@ export function ReceiptView({
 
       <div className="border-t border-dashed border-gray-300" />
 
-      <div className="flex justify-between font-bold text-sm">
+      <div className="flex justify-between font-bold" style={{ fontSize: 17 }}>
         <span>TOTAL</span>
         <span>RM {total.toFixed(2)}</span>
       </div>

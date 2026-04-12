@@ -1212,6 +1212,7 @@ export default function PaymentClient({ categories, customers, packages, employe
       <CustomerFormDialog
         open={registerOpen}
         onClose={() => setRegisterOpen(false)}
+        initialPhone={customerQuery.trim()}
         onCreated={(newCustomer) => {
           void handleCustomerSelect(newCustomer);
           setRegisterOpen(false);
