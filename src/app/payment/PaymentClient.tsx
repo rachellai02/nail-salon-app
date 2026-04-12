@@ -96,7 +96,7 @@ export default function PaymentClient({ categories, customers, packages, employe
       }
     } catch { /* ignore */ }
   }, [selectedCustomer]);
-  const [pendingSellPackages, setPendingSellPackages] = useState<Package[]>([]);
+  const [pendingSellPackages, setPendingSellPackages] = useState<{ pkg: Package; qty: number }[]>([]);
   const [pendingShowReceipt, setPendingShowReceipt] = useState(false);
   const [deductingPackage, setDeductingPackage] = useState<CustomerPackage | null>(null);
   const [deductedServiceNames, setDeductedServiceNames] = useState<string[]>([]);
@@ -265,9 +265,26 @@ export default function PaymentClient({ categories, customers, packages, employe
           return;
         }
 
-        // Extra-items package deduction completed → check if any extra items still uncovered
-        const allDeducted = new Set([...deductedServiceNames, ...names]);
-        const remaining = extraCartItems.filter((item) => !allDeducted.has(item.service.name));
+        // Extra-items package deduction completed → check if any extra items still uncovered (quantity-aware)
+        const deductCounts1 = new Map<string, number>();
+        for (const n of [...deductedServiceNames, ...names]) {
+          const k = n.trim().toLowerCase();
+          deductCounts1.set(k, (deductCounts1.get(k) ?? 0) + 1);
+        }
+        const remaining = [] as typeof cart;
+        for (const item of extraCartItems) {
+          const k = item.service.name.trim().toLowerCase();
+          const avail = deductCounts1.get(k) ?? 0;
+          const needed = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+          if (avail <= 0) {
+            remaining.push(item);
+          } else if (avail >= needed) {
+            deductCounts1.set(k, avail - needed);
+          } else {
+            deductCounts1.set(k, 0);
+            remaining.push({ ...item, qty: String(needed - avail) });
+          }
+        }
         if (remaining.length > 0) {
           setExtraCartItems(remaining);
           setExtraPaymentType(null);
@@ -292,26 +309,53 @@ export default function PaymentClient({ categories, customers, packages, employe
         setDialogStep("extra-payment");
         return;
       }
-      // Deduction was confirmed — skip back to package list and go straight to extra payment check
-      const allDeducted = new Set([...deductedServiceNames, ...names]);
-      const extras = cart.filter((item) => !allDeducted.has(item.service.name));
-      if (extras.length > 0) {
-        setExtraCartItems(extras);
-        setExtraPaymentType(null);
-        setExtraCashReceived("");
-        setDialogStep("extra-payment");
-      } else {
+      // Deduction confirmed — check if fully covered; if not, return to package list so the
+      // user can deduct from another package before clicking "Done".
+      const deductCounts2 = new Map<string, number>();
+      for (const n of [...deductedServiceNames, ...names]) {
+        const k = n.trim().toLowerCase();
+        deductCounts2.set(k, (deductCounts2.get(k) ?? 0) + 1);
+      }
+      let allCovered = true;
+      for (const item of cart) {
+        const k = item.service.name.trim().toLowerCase();
+        const avail = deductCounts2.get(k) ?? 0;
+        const needed = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+        if (avail < needed) { allCovered = false; break; }
+        deductCounts2.set(k, avail - needed);
+      }
+      if (allCovered) {
         setReceiptNo(await fetchReceiptNo());
         setReceiptDate(currentReceiptDate());
         setDialogStep("success");
+      } else {
+        // Return to package list — user may deduct from another package
+        setDialogStep("package-deduct");
       }
     }
   }
 
   async function handlePackageDeductDone() {
-    // Detect cart items whose service name was not deducted from any package
-    const deductedSet = new Set(deductedServiceNames);
-    const extras = cart.filter((item) => !deductedSet.has(item.service.name));
+    // Detect cart items whose service name was not deducted from any package (quantity-aware)
+    const deductCounts = new Map<string, number>();
+    for (const n of deductedServiceNames) {
+      const k = n.trim().toLowerCase();
+      deductCounts.set(k, (deductCounts.get(k) ?? 0) + 1);
+    }
+    const extras = [] as typeof cart;
+    for (const item of cart) {
+      const k = item.service.name.trim().toLowerCase();
+      const avail = deductCounts.get(k) ?? 0;
+      const needed = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+      if (avail <= 0) {
+        extras.push(item);
+      } else if (avail >= needed) {
+        deductCounts.set(k, avail - needed);
+      } else {
+        deductCounts.set(k, 0);
+        extras.push({ ...item, qty: String(needed - avail) });
+      }
+    }
     if (extras.length > 0) {
       setExtraCartItems(extras);
       setExtraPaymentType(null);
@@ -366,15 +410,16 @@ export default function PaymentClient({ categories, customers, packages, employe
   function handleSendReceipt() {
     // If cart contains packages and a customer is selected, sell packages first
     if (selectedCustomer) {
-      const seen = new Set<string>();
-      const matched: Package[] = [];
+      const seen = new Map<string, { pkg: Package; qty: number }>();
       for (const item of cart) {
         const pkg = packages.find((p) => p.name === item.service.name && p.is_active);
-        if (pkg && !seen.has(pkg.id)) {
-          seen.add(pkg.id);
-          matched.push(pkg);
+        if (pkg) {
+          const qty = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+          const existing = seen.get(pkg.id);
+          seen.set(pkg.id, { pkg, qty: (existing?.qty ?? 0) + qty });
         }
       }
+      const matched = [...seen.values()];
       if (matched.length > 0) {
         packageSoldInFlowRef.current = true;
         setPendingSellPackages(matched);
@@ -543,6 +588,10 @@ export default function PaymentClient({ categories, customers, packages, employe
 
   const hasEmptyPrice = cart.some((item) => item.price.trim() === "" || isNaN(parseFloat(item.price)));
 
+  // Determine if cart currently contains package-sale items or regular service items
+  const cartHasPackageSale = cart.some((item) => packages.some((p) => p.name === item.service.name && p.is_active));
+  const cartHasService     = cart.some((item) => !packages.some((p) => p.name === item.service.name && p.is_active));
+
   return (
     <div className="flex h-[calc(100vh-65px)] overflow-hidden -mx-6 -my-8">
       {/* Left 60% — service catalogue */}
@@ -569,7 +618,12 @@ export default function PaymentClient({ categories, customers, packages, employe
                   <button
                     key={svc.id}
                     type="button"
-                    disabled={mounted && (!selectedEmployee || !selectedCustomer)}
+                    disabled={
+                      (mounted && (!selectedEmployee || !selectedCustomer)) ||
+                      (packages.some((p) => p.name === svc.name && p.is_active)
+                        ? cartHasService
+                        : cartHasPackageSale)
+                    }
                     onClick={() => addToCart(svc)}
                     className="flex items-center justify-between gap-4 border rounded-lg px-4 py-2 text-sm transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-gray-400 hover:enabled:bg-gray-50 active:enabled:bg-gray-100"
                   >
@@ -873,7 +927,7 @@ export default function PaymentClient({ categories, customers, packages, employe
                     const hasActivePackage = customerPackages.some(
                       (cp) => (cp.remaining_uses > 0 || (cp.remaining_credits ?? 0) > 0) && !cp.completed_at
                     );
-                    const disabled = type === "Package" && (!selectedCustomer || !hasActivePackage);
+                    const disabled = type === "Package" && (!selectedCustomer || !hasActivePackage || cartHasPackageSale);
                     return (
                       <button
                         key={type}
@@ -907,6 +961,58 @@ export default function PaymentClient({ categories, customers, packages, employe
                 <DialogTitle>Deduct Package Uses</DialogTitle>
               </DialogHeader>
 
+              {/* Cart remaining tracker */}
+              {(() => {
+                const deductCounts = new Map<string, number>();
+                for (const n of deductedServiceNames) {
+                  const k = n.trim().toLowerCase();
+                  deductCounts.set(k, (deductCounts.get(k) ?? 0) + 1);
+                }
+                const remaining: { name: string; qty: number; subtotal: number }[] = [];
+                for (const item of cart) {
+                  const k = item.service.name.trim().toLowerCase();
+                  const avail = deductCounts.get(k) ?? 0;
+                  const needed = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+                  const leftover = Math.max(0, needed - avail);
+                  deductCounts.set(k, Math.max(0, avail - needed));
+                  if (leftover > 0) {
+                    const unitPrice = parseFloat(item.price) || 0;
+                    remaining.push({ name: item.service.name, qty: leftover, subtotal: unitPrice * leftover });
+                  }
+                }
+                // Build set of uncovered service name keys for use in package list
+                const uncoveredKeys = new Set(remaining.map((r) => r.name.trim().toLowerCase()));
+                const remainingTotal = remaining.reduce((s, r) => s + r.subtotal, 0);
+                const allCovered = remaining.length === 0;
+                return (
+                  <>
+                  <div className={`rounded-lg border px-3 py-2 text-sm ${allCovered ? "border-green-300 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
+                    <p className={`font-semibold mb-1 ${allCovered ? "text-green-700" : "text-amber-800"}`}>
+                      {allCovered ? "All cart items covered ✓" : "Cart items still to cover"}
+                    </p>
+                    {!allCovered && (
+                      <>
+                        <div className="space-y-0.5">
+                          {remaining.map((r, i) => (
+                            <div key={i} className="flex justify-between text-amber-900">
+                              <span>{r.qty > 1 ? `${r.name} ×${r.qty}` : r.name}</span>
+                              <span className="font-medium">RM {r.subtotal.toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-between border-t border-amber-200 mt-1 pt-1 font-bold text-amber-900">
+                          <span>Uncovered total</span>
+                          <span>RM {remainingTotal.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* Store uncoveredKeys on a ref-like hidden element so package list can use it */}
+                  <div data-uncovered-keys={[...uncoveredKeys].join(",")} className="hidden" />
+                  </>
+                );
+              })()}
+
               {customerPackages.length === 0 ? (
                 <p className="text-sm text-gray-500 py-2">
                   No active packages found for this customer.
@@ -914,7 +1020,22 @@ export default function PaymentClient({ categories, customers, packages, employe
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-gray-500">Tap a package to deduct uses for it.</p>
-                  {customerPackages.map((cp) => (
+                  {customerPackages.map((cp) => {
+                    // Compute uncovered keys inline for highlighting
+                    const dcPkg = new Map<string, number>();
+                    for (const n of deductedServiceNames) {
+                      const k = n.trim().toLowerCase();
+                      dcPkg.set(k, (dcPkg.get(k) ?? 0) + 1);
+                    }
+                    const uncoveredKeysPkg = new Set<string>();
+                    for (const item of cart) {
+                      const k = item.service.name.trim().toLowerCase();
+                      const avail = dcPkg.get(k) ?? 0;
+                      const needed = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+                      dcPkg.set(k, Math.max(0, avail - needed));
+                      if (avail < needed) uncoveredKeysPkg.add(k);
+                    }
+                    return (
                     <button
                       key={cp.id}
                       type="button"
@@ -931,23 +1052,48 @@ export default function PaymentClient({ categories, customers, packages, employe
                         </p>
                       ) : (
                         <ul className="space-y-0.5">
-                          {(cp.items ?? []).map((item) => (
+                          {(cp.items ?? []).map((item) => {
+                            const k = item.service_name.trim().toLowerCase();
+                            const isUncovered = item.remaining_uses > 0 && uncoveredKeysPkg.has(k);
+                            return (
                             <li key={item.id} className="flex justify-between text-xs text-gray-600">
                               <span>{item.service_name}</span>
-                              <span className={item.remaining_uses === 0 ? "text-gray-300" : "font-semibold"}>
+                              <span className={
+                                item.remaining_uses === 0
+                                  ? "text-gray-300"
+                                  : isUncovered
+                                  ? "font-bold text-green-600"
+                                  : "font-semibold"
+                              }>
                                 {item.remaining_uses}/{item.total_uses} left
                               </span>
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                       )}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
               <Button className="w-full mt-2" onClick={handlePackageDeductDone}>
-                Done — Proceed to Receipt
+                {(() => {
+                  const dc = new Map<string, number>();
+                  for (const n of deductedServiceNames) {
+                    const k = n.trim().toLowerCase();
+                    dc.set(k, (dc.get(k) ?? 0) + 1);
+                  }
+                  const hasRemaining = cart.some((item) => {
+                    const k = item.service.name.trim().toLowerCase();
+                    const avail = dc.get(k) ?? 0;
+                    const needed = Math.max(1, Math.round(parseFloat(item.qty) || 1));
+                    dc.set(k, Math.max(0, avail - needed));
+                    return avail < needed;
+                  });
+                  return hasRemaining ? "Proceed to Payment for Extra Items" : "Done — Proceed to Receipt";
+                })()}
               </Button>
             </>
           )}
@@ -1226,7 +1372,8 @@ export default function PaymentClient({ categories, customers, packages, employe
         packages={packages}
         customers={customers}
         defaultCustomerId={selectedCustomer?.id}
-        defaultPackageId={pendingSellPackages[0]?.id}
+        defaultPackageId={pendingSellPackages[0]?.pkg.id}
+        defaultQuantity={pendingSellPackages[0]?.qty}
         defaultPaymentType={paymentType ?? undefined}
         skipTransaction
       />
@@ -1251,15 +1398,35 @@ export default function PaymentClient({ categories, customers, packages, employe
             // Credit package used for extra cart items
             deductedAmount = extraCartItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1), 0) - (topup ?? 0);
           } else {
-            // Credit package used for main cart
-            deductedAmount = total - (topup ?? 0);
+            // Credit package used for main cart — sum prices of the services actually deducted
+            const creditNameMap = new Map<string, number>();
+            for (const n of names) {
+              const k = n.trim().toLowerCase();
+              creditNameMap.set(k, (creditNameMap.get(k) ?? 0) + 1);
+            }
+            let coveredTotal = 0;
+            for (const [k, cnt] of creditNameMap) {
+              const cartItem = cart.find((item) => item.service.name.trim().toLowerCase() === k);
+              const unitPrice = cartItem ? (parseFloat(cartItem.price) || 0) : 0;
+              coveredTotal += unitPrice * cnt;
+            }
+            deductedAmount = coveredTotal - (topup ?? 0);
           }
         } else {
-          const nameSet = new Set(names);
+          // Count how many of each service name were actually deducted by this dialog
+          const nameCountMap = new Map<string, number>();
+          for (const n of names) {
+            const k = n.trim().toLowerCase();
+            nameCountMap.set(k, (nameCountMap.get(k) ?? 0) + 1);
+          }
+          // Look up unit price from cart (or extraCartItems for topup flows) per deducted count
           const sourceItems = isTopupDeductRef.current ? extraCartItems : cart;
-          deductedAmount = sourceItems
-            .filter((item) => nameSet.has(item.service.name))
-            .reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1), 0);
+          deductedAmount = 0;
+          for (const [k, cnt] of nameCountMap) {
+            const cartItem = sourceItems.find((item) => item.service.name.trim().toLowerCase() === k);
+            const unitPrice = cartItem ? (parseFloat(cartItem.price) || 0) : 0;
+            deductedAmount += unitPrice * cnt;
+          }
         }
         setPackageDeductions((prev) => [...prev, { packageName: pkgName, amount: deductedAmount }]);
       }}
@@ -1269,14 +1436,37 @@ export default function PaymentClient({ categories, customers, packages, employe
             ? (extraCreditTopup !== null
                 ? ["Package Top-Up"]
                 : extraCartItems.map((item) => item.service.name))
-            : cart.map((item) => item.service.name)
+            : (() => {
+                const dm = new Map<string, number>();
+                for (const n of deductedServiceNames) {
+                  const k = n.trim().toLowerCase();
+                  dm.set(k, (dm.get(k) ?? 0) + 1);
+                }
+                return cart.flatMap((item) => {
+                  const k = item.service.name.trim().toLowerCase();
+                  const rem = Math.max(0, Math.max(1, Math.round(parseFloat(item.qty) || 1)) - (dm.get(k) ?? 0));
+                  return Array.from({ length: rem }, () => item.service.name);
+                });
+              })()
         }
         cartItems={
           isTopupDeductRef.current
             ? (extraCreditTopup !== null
                 ? [{ service_name: "Package Top-Up", price: (extraCreditTopup ?? 0).toFixed(2), qty: "1" }]
                 : extraCartItems.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty })))
-            : cart.map((item) => ({ service_name: item.service.name, price: item.price, qty: item.qty }))
+            : (() => {
+                const dm = new Map<string, number>();
+                for (const n of deductedServiceNames) {
+                  const k = n.trim().toLowerCase();
+                  dm.set(k, (dm.get(k) ?? 0) + 1);
+                }
+                return cart.flatMap((item) => {
+                  const k = item.service.name.trim().toLowerCase();
+                  const rem = Math.max(0, Math.max(1, Math.round(parseFloat(item.qty) || 1)) - (dm.get(k) ?? 0));
+                  if (rem === 0) return [];
+                  return [{ service_name: item.service.name, price: item.price, qty: rem.toString() }];
+                });
+              })()
         }
       />
 

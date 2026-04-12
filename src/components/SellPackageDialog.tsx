@@ -45,6 +45,7 @@ const schema = z.object({
   package_id: z.string().min(1, "Please select a package"),
   customer_id: z.string().min(1, "Please select a customer"),
   expiry_years: z.string().min(1, "Please select expiry duration"),
+  quantity: z.number().int().min(1).max(20),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -56,6 +57,7 @@ type Props = {
   defaultCustomerId?: string;
   defaultPackageId?: string;
   defaultPaymentType?: string;
+  defaultQuantity?: number;
   skipTransaction?: boolean;
 };
 
@@ -63,13 +65,14 @@ const wrappingSelectTriggerClass =
   "w-full !h-auto min-h-[40px] py-2 !items-start !whitespace-normal data-[size=default]:h-auto [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:items-start [&_[data-slot=select-value]]:min-w-0";
 const wrappingSelectValueClass = "!line-clamp-none !whitespace-normal !items-start !min-w-0";
 
-export function SellPackageDialog({ open, onClose, packages, customers, defaultCustomerId, defaultPackageId, defaultPaymentType, skipTransaction }: Props) {
+export function SellPackageDialog({ open, onClose, packages, customers, defaultCustomerId, defaultPackageId, defaultPaymentType, defaultQuantity, skipTransaction }: Props) {
   const [loading, setLoading] = useState(false);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
-  const [selectedExpiryYears, setSelectedExpiryYears] = useState<string>("");
+  const [selectedExpiryYears, setSelectedExpiryYears] = useState<string>("1");
   const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | "">("");
+  const [quantity, setQuantity] = useState(1);
   const activePackages = packages.filter((p) => p.is_active);
   
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
@@ -82,6 +85,7 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
+    defaultValues: { quantity: 1 },
   });
 
   // Set default customer when dialog opens
@@ -90,7 +94,14 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
       setSelectedCustomerId(defaultCustomerId);
       setValue("customer_id", defaultCustomerId);
     }
-  }, [open, defaultCustomerId, setValue]);
+    if (open) {
+      setSelectedExpiryYears("1");
+      setValue("expiry_years", "1");
+      const q = defaultQuantity && defaultQuantity >= 1 ? defaultQuantity : 1;
+      setQuantity(q);
+      setValue("quantity", q);
+    }
+  }, [open, defaultCustomerId, defaultQuantity, setValue]);
 
   // Set default package when dialog opens or advances to next package in queue;
   // also re-apply customer because form is reset after each submission
@@ -121,13 +132,16 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
       const years = parseInt(data.expiry_years, 10);
       const expiryDate = new Date(now);
       expiryDate.setFullYear(now.getFullYear() + years);
-      const expiry_date = expiryDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+      const expiry_date = expiryDate.toISOString().split('T')[0];
 
-      await createCustomerPackage({
-        package_id: data.package_id,
-        customer_id: data.customer_id,
-        expiry_date,
-      });
+      // Create one customer_package record per unit
+      for (let i = 0; i < data.quantity; i++) {
+        await createCustomerPackage({
+          package_id: data.package_id,
+          customer_id: data.customer_id,
+          expiry_date,
+        });
+      }
 
       // Record a sales transaction for this package sale (not counted in daily totals)
       // Skipped when called from the payment flow — the main receipt already records it
@@ -139,25 +153,27 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
           await createTransaction({
             receipt_no: receiptNo,
             payment_type: `Package Sale - ${selectedPaymentType || "Cash"}`,
-            total: pkg.price ?? 0,
+            total: (pkg.price ?? 0) * data.quantity,
             customer_id: data.customer_id,
             customer_name: customer?.name ?? null,
             customer_phone: customer?.contact_number ?? null,
             items: [{
               service_name: pkg.name,
-              qty: 1,
+              qty: data.quantity,
               unit_price: pkg.price ?? 0,
-              subtotal: pkg.price ?? 0,
+              subtotal: (pkg.price ?? 0) * data.quantity,
             }],
           });
         }
       }
 
-      toast.success("Package sold and recorded successfully!");
+      toast.success(`${data.quantity > 1 ? `${data.quantity}× ` : ""}Package sold and recorded successfully!`);
       reset();
       setSelectedCustomerId("");
       setSelectedPackageId("");
-      setSelectedExpiryYears("");
+      setSelectedExpiryYears("1");
+      setValue("expiry_years", "1");
+      setQuantity(1);
       // Preserve payment type if a default is provided (multi-package queue keeps open=true)
       if (!defaultPaymentType) setSelectedPaymentType("");
       onClose();
@@ -176,7 +192,7 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); if (!defaultPaymentType) setSelectedPaymentType(""); onClose(); } }}>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears("1"); setValue("expiry_years", "1"); setQuantity(1); setValue("quantity", 1); if (!defaultPaymentType) setSelectedPaymentType(""); onClose(); } }}>
         <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none px-5">
           <DialogHeader>
             <DialogTitle>Sell Package to Customer</DialogTitle>
@@ -250,6 +266,27 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
               {errors.package_id && <p className="text-xs text-red-500">{errors.package_id.message}</p>}
             </div>
             <div className="space-y-1">
+              <Label>Quantity</Label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={quantity <= 1}
+                  onClick={() => { const n = Math.max(1, quantity - 1); setQuantity(n); setValue("quantity", n); }}
+                  className="w-8 h-8 rounded border text-base font-bold flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >−</button>
+                <span className="w-8 text-center font-semibold">{quantity}</span>
+                <button
+                  type="button"
+                  disabled={quantity >= 20}
+                  onClick={() => { const n = Math.min(20, quantity + 1); setQuantity(n); setValue("quantity", n); }}
+                  className="w-8 h-8 rounded border text-base font-bold flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >+</button>
+                {quantity > 1 && selectedPackage && (
+                  <span className="text-sm text-gray-500 ml-1">= {quantity} separate packages</span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1">
               <Label>Expiry Duration</Label>
               <Select 
                 value={selectedExpiryYears}
@@ -299,7 +336,7 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
             </div>
             )}
             <DialogFooter className="pt-4 pb-4 pl-0 pr-5 sm:pl-0 sm:pr-5">
-              <Button type="button" variant="outline" onClick={() => { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears(""); if (!defaultPaymentType) setSelectedPaymentType(""); onClose(); }}>
+              <Button type="button" variant="outline" onClick={() => { reset(); setSelectedCustomerId(""); setSelectedPackageId(""); setSelectedExpiryYears("1"); setValue("expiry_years", "1"); setQuantity(1); setValue("quantity", 1); if (!defaultPaymentType) setSelectedPaymentType(""); onClose(); }}>
                 Cancel
               </Button>
               <Button type="submit" disabled={loading || !selectedPaymentType}>

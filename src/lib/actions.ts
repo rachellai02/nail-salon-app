@@ -1340,6 +1340,7 @@ export async function deductPackageUse(
   usedAt?: string,
   creditsUsed?: number,
   creditServices?: { service_name: string; price: number }[],
+  count?: number,
 ): Promise<void> {
   if (creditServices && creditServices.length > 0) {
     // Credit-type package deduction with per-service breakdown
@@ -1409,6 +1410,7 @@ export async function deductPackageUse(
     if (logError) throw new Error(logError.message);
   } else if (customerPackageItemId) {
     // Item-based deduction (new packages with items)
+    const deductCount = Math.max(1, Math.round(count ?? 1));
     const { data: item, error: fetchItemError } = await supabase
       .from("customer_package_items")
       .select("remaining_uses, service_name")
@@ -1417,10 +1419,11 @@ export async function deductPackageUse(
 
     if (fetchItemError || !item) throw new Error("Package item not found");
     if (item.remaining_uses <= 0) throw new Error(`No remaining uses for "${item.service_name}"`);
+    if (deductCount > item.remaining_uses) throw new Error(`Only ${item.remaining_uses} use${item.remaining_uses > 1 ? "s" : ""} remaining for "${item.service_name}"`);
 
     const { error: updateItemError } = await supabase
       .from("customer_package_items")
-      .update({ remaining_uses: item.remaining_uses - 1 })
+      .update({ remaining_uses: item.remaining_uses - deductCount })
       .eq("id", customerPackageItemId);
 
     if (updateItemError) throw new Error(updateItemError.message);
@@ -1433,13 +1436,15 @@ export async function deductPackageUse(
     const newTotal = (allItems ?? []).reduce((sum: number, i: any) => sum + i.remaining_uses, 0);
     await supabase.from("customer_packages").update({ remaining_uses: newTotal }).eq("id", customerPackageId);
 
-    const { error: logError } = await supabase.from("package_usage_logs").insert([{
+    const timestamp = usedAt ?? new Date().toISOString();
+    const logRows = Array.from({ length: deductCount }, () => ({
       customer_package_id: customerPackageId,
       customer_package_item_id: customerPackageItemId,
       service_name: item.service_name,
-      used_at: usedAt ?? new Date().toISOString(),
+      used_at: timestamp,
       notes: notes ?? null,
-    }]);
+    }));
+    const { error: logError } = await supabase.from("package_usage_logs").insert(logRows);
     if (logError) throw new Error(logError.message);
   } else {
     // Legacy: deduct from the whole package (packages without items)

@@ -27,10 +27,14 @@ type Props = {
 };
 
 export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, cartServiceNames, cartItems }: Props) {
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState("Own Use");
+  const [noteType, setNoteType] = useState<"Own Use" | "Friend Use">("Own Use");
+  const [friendDetails, setFriendDetails] = useState("");
   const [usedDateTime, setUsedDateTime] = useState("");
   const [loading, setLoading] = useState(false);
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  // Map of customerPackageItem.id → number of uses to deduct
+  const [itemCounts, setItemCounts] = useState<Map<string, number>>(new Map());
+  const [legacyCount, setLegacyCount] = useState(1);
   const [creditServices, setCreditServices] = useState<{ service_name: string; price: string }[]>([{ service_name: "", price: "" }]);
 
   const items: CustomerPackageItem[] = customerPackage?.items ?? [];
@@ -44,9 +48,11 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
       .toISOString()
       .slice(0, 16);
     setUsedDateTime(local);
-    setSelectedItemIds(new Set());
-    setNotes("");
-    // Pre-populate credit services from cart when available
+    setNoteType("Own Use");
+    setNotes("Own Use");
+    setFriendDetails("");
+    setLegacyCount(1);
+
     const pkg = customerPackage;
     const isCredit_ = (pkg?.package?.package_type ?? "services") === "credit";
     if (isCredit_ && cartItems && cartItems.length > 0) {
@@ -61,13 +67,35 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
     } else {
       setCreditServices([{ service_name: "", price: "" }]);
     }
+
+    // Auto-populate item counts from cart quantities
+    const pkgItems: CustomerPackageItem[] = pkg?.items ?? [];
+    if (!isCredit_ && pkgItems.length > 0 && cartItems && cartItems.length > 0) {
+      const cartCountMap = new Map<string, number>();
+      for (const ci of cartItems) {
+        const k = ci.service_name.trim().toLowerCase();
+        cartCountMap.set(k, (cartCountMap.get(k) ?? 0) + Math.max(1, Math.round(parseFloat(ci.qty) || 1)));
+      }
+      const initial = new Map<string, number>();
+      for (const it of pkgItems) {
+        const k = it.service_name.trim().toLowerCase();
+        const wanted = cartCountMap.get(k) ?? 0;
+        if (wanted > 0 && it.remaining_uses > 0) {
+          initial.set(it.id, Math.min(wanted, it.remaining_uses));
+        }
+      }
+      setItemCounts(initial);
+    } else {
+      setItemCounts(new Map());
+    }
   }, [open]);
 
-  function toggleItem(id: string) {
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  function adjustCount(id: string, delta: number, max: number) {
+    setItemCounts((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(id) ?? 0;
+      const n = Math.min(Math.max(cur + delta, 0), max);
+      if (n === 0) next.delete(id); else next.set(id, n);
       return next;
     });
   }
@@ -82,7 +110,7 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
     setCreditServices((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  const selectedCount = selectedItemIds.size;
+  const totalUsesToDeduct = [...itemCounts.values()].reduce((s, v) => s + v, 0);
   const remaining = customerPackage?.remaining_credits ?? 0;
   const totalCredits = creditServices.reduce((sum, s) => sum + (parseFloat(s.price) || 0), 0);
   const cashTopup = Math.max(0, totalCredits - remaining);
@@ -90,20 +118,24 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
   // Validate selected items against cart
   const invalidSelectedItems = hasItems && cartServiceNames
     ? items.filter((item) =>
-        selectedItemIds.has(item.id) &&
+        (itemCounts.get(item.id) ?? 0) > 0 &&
         !cartServiceNames.some((n) => n.trim().toLowerCase() === item.service_name.trim().toLowerCase())
       )
     : [];
   const hasInvalidSelection = invalidSelectedItems.length > 0;
 
-  const canConfirm = !loading && !!notes.trim() && !hasInvalidSelection && (
+  const composedNotes = noteType === "Friend Use"
+    ? `Friend Use${friendDetails.trim() ? ` - ${friendDetails.trim()}` : ""}`
+    : "Own Use";
+
+  const canConfirm = !loading && !(noteType === "Friend Use" && !friendDetails.trim()) && !hasInvalidSelection && (
     isCredit
       ? creditServices.length > 0 &&
         creditServices.every((s) => s.service_name.trim() !== "" && parseFloat(s.price) > 0) &&
         totalCredits > 0
       : hasItems
-      ? selectedCount > 0
-      : (customerPackage?.remaining_uses ?? 0) > 0
+      ? totalUsesToDeduct > 0
+      : legacyCount >= 1 && legacyCount <= (customerPackage?.remaining_uses ?? 0)
   );
 
   async function handleConfirm() {
@@ -114,22 +146,23 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
       let deductedNames: string[] = [];
       if (isCredit) {
         const services = creditServices.map((s) => ({ service_name: s.service_name.trim(), price: parseFloat(s.price) }));
-        await deductPackageUse(customerPackage.id, null, notes.trim(), usedAtIso, undefined, services);
+        await deductPackageUse(customerPackage.id, null, composedNotes, usedAtIso, undefined, services);
         const newRemaining = Math.max(0, (customerPackage.remaining_credits ?? 0) - totalCredits);
         const topupMsg = cashTopup > 0 ? ` + ${cashTopup} cash top-up` : "";
         toast.success(`${totalCredits} deducted ${topupMsg}. ${newRemaining} credits remaining.`);
         deductedNames = creditServices.map((s) => s.service_name.trim()).filter(Boolean);
       } else if (hasItems) {
-        for (const itemId of selectedItemIds) {
-          await deductPackageUse(customerPackage.id, itemId, notes.trim(), usedAtIso);
+        for (const [itemId, cnt] of itemCounts) {
+          if (cnt <= 0) continue;
+          await deductPackageUse(customerPackage.id, itemId, composedNotes, usedAtIso, undefined, undefined, cnt);
+          const svcName = items.find((i) => i.id === itemId)?.service_name ?? "";
+          for (let x = 0; x < cnt; x++) deductedNames.push(svcName);
         }
-        deductedNames = items
-          .filter((i) => selectedItemIds.has(i.id))
-          .map((i) => i.service_name);
-        toast.success(`Deducted: ${deductedNames.join(", ")}`);
+        toast.success(`Deducted ${totalUsesToDeduct} use${totalUsesToDeduct !== 1 ? "s" : ""}: ${[...new Set(deductedNames)].join(", ")}`);
       } else {
-        await deductPackageUse(customerPackage.id, null, notes.trim(), usedAtIso);
-        toast.success(`1 use deducted. ${(customerPackage.remaining_uses ?? 1) - 1} remaining.`);
+        await deductPackageUse(customerPackage.id, null, composedNotes, usedAtIso, undefined, undefined, legacyCount);
+        toast.success(`${legacyCount} use${legacyCount !== 1 ? "s" : ""} deducted. ${(customerPackage.remaining_uses ?? legacyCount) - legacyCount} remaining.`);
+        for (let x = 0; x < legacyCount; x++) deductedNames.push("");
       }
       onDeducted?.(deductedNames, isCredit && cashTopup > 0 ? cashTopup : undefined);
       onClose();
@@ -231,33 +264,30 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
           </div>
         ) : hasItems ? (
           <div className="space-y-2">
-            <Label>Select services to deduct <span className="text-gray-400 font-normal">(tap to toggle)</span></Label>
+            <Label>Select services and quantity to deduct</Label>
             <div className="space-y-1.5">
               {items.map((item) => {
                 const exhausted = item.remaining_uses <= 0;
-                const selected = selectedItemIds.has(item.id);
+                const count = itemCounts.get(item.id) ?? 0;
+                const selected = count > 0;
                 const notInCart = cartServiceNames != null &&
                   !cartServiceNames.some((n) => n.trim().toLowerCase() === item.service_name.trim().toLowerCase());
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
-                    disabled={exhausted}
-                    onClick={() => toggleItem(item.id)}
                     className={[
                       "w-full flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors",
-                      exhausted ? "opacity-40 cursor-not-allowed bg-gray-50" : "cursor-pointer hover:border-gray-400",
+                      exhausted ? "opacity-40 cursor-not-allowed bg-gray-50" : "",
                       selected && hasInvalidSelection && notInCart
                         ? "border-red-500 bg-red-50"
                         : selected
-                        ? "border-gray-900 bg-gray-50 font-medium"
+                        ? "border-gray-900 bg-gray-50"
                         : "border-gray-200",
                     ].join(" ")}
                   >
-                    <span>{item.service_name}</span>
+                    <span className={selected ? "font-medium" : ""}>{item.service_name}</span>
                     <div className="flex items-center gap-2">
-                      {notInCart && <span className="text-xs text-amber-600 font-medium">not in cart</span>}
-                      {selected && <span className="text-xs font-semibold text-gray-900">✓</span>}
+                      {notInCart && selected && <span className="text-xs text-amber-600 font-medium">not in cart</span>}
                       <Badge
                         variant={
                           exhausted ? "destructive" : item.remaining_uses <= 1 ? "secondary" : "default"
@@ -265,21 +295,45 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
                       >
                         {item.remaining_uses}/{item.total_uses} left
                       </Badge>
+                      {/* Stepper */}
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          disabled={exhausted || count === 0}
+                          onClick={() => adjustCount(item.id, -1, item.remaining_uses)}
+                          className="w-6 h-6 rounded border text-sm font-bold flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >−</button>
+                        <span className="w-5 text-center text-sm font-semibold">{count}</span>
+                        <button
+                          type="button"
+                          disabled={exhausted || count >= item.remaining_uses}
+                          onClick={() => adjustCount(item.id, +1, item.remaining_uses)}
+                          className="w-6 h-6 rounded border text-sm font-bold flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >+</button>
+                      </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
             {hasInvalidSelection && (
               <p className="text-sm text-red-600">
-                The following services are not in the current cart: <strong>{invalidSelectedItems.map((i) => i.service_name).join(", ")}</strong>. Please deselect them before confirming.
+                The following services are not in the current cart: <strong>{invalidSelectedItems.map((i) => i.service_name).join(", ")}</strong>. Please set their count to 0 before confirming.
               </p>
             )}
           </div>
         ) : (
-          <p className="text-sm text-gray-600">
-            Remaining uses: <strong>{customerPackage?.remaining_uses ?? 0}</strong>
-          </p>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600">Uses to deduct (max {customerPackage?.remaining_uses ?? 0}):</span>
+            <Input
+              type="number"
+              min={1}
+              max={customerPackage?.remaining_uses ?? 1}
+              value={legacyCount}
+              onChange={(e) => setLegacyCount(Math.min(Math.max(1, parseInt(e.target.value) || 1), customerPackage?.remaining_uses ?? 1))}
+              className="w-20"
+            />
+          </div>
         )}
 
         <div className="space-y-2">
@@ -288,15 +342,29 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="notes">Notes <span className="text-red-500">*</span></Label>
-          <textarea
-            id="notes"
-            placeholder="e.g. Own use / Friend use"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={3}
-            className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm whitespace-normal break-words"
-          />
+          <Label>Notes <span className="text-red-500">*</span></Label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["Own Use", "Friend Use"] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setNoteType(opt)}
+                className={`border rounded-lg px-3 py-2 text-sm text-left transition-colors ${
+                  noteType === opt ? "border-black bg-black text-white" : "hover:border-gray-400"
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+          {noteType === "Friend Use" && (
+            <Input
+              placeholder="Friend's name / details"
+              value={friendDetails}
+              onChange={(e) => setFriendDetails(e.target.value)}
+              autoFocus
+            />
+          )}
         </div>
 
         <DialogFooter className="mt-2">
@@ -306,9 +374,11 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
               ? "Processing..."
               : isCredit
               ? `Confirm — Deduct ${totalCredits > 0 ? Math.min(totalCredits, remaining) : "?"} Credits`
-              : hasItems && selectedCount > 0
-              ? `Confirm — Deduct ${selectedCount} Use${selectedCount > 1 ? "s" : ""}`
-              : "Confirm — Deduct 1 Use"}
+              : hasItems && totalUsesToDeduct > 0
+              ? `Confirm — Deduct ${totalUsesToDeduct} Use${totalUsesToDeduct > 1 ? "s" : ""}`
+              : hasItems
+              ? "Confirm — Deduct Uses"
+              : `Confirm — Deduct ${legacyCount} Use${legacyCount > 1 ? "s" : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -124,7 +124,13 @@ export default function CustomerPackagesClient({
                 <TableCell className="text-gray-500 text-sm">
                   {customer.birthday ? formatDateMY(customer.birthday) : "—"}
                 </TableCell>
-                <TableCell>{customerPkgs.filter((pkg) => pkg.remaining_uses > 0).length}</TableCell>
+                <TableCell>{customerPkgs.filter((pkg) =>
+                  pkg.completed_at == null && (
+                    pkg.package?.package_type === "credit"
+                      ? (pkg.remaining_credits ?? 0) > 0
+                      : pkg.remaining_uses > 0
+                  )
+                ).length}</TableCell>
                 <TableCell>
                   <Button
                     size="sm"
