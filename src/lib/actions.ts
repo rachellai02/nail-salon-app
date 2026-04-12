@@ -1513,13 +1513,14 @@ export async function createAppointment(input: {
   num_persons?: number;
   has_package?: boolean;
   status?: string;
-}): Promise<void> {
-  const { error } = await supabase.from("appointments").insert([{
+}): Promise<string> {
+  const { data, error } = await supabase.from("appointments").insert([{
     ...input,
     status: input.status ?? "confirmed",
-  }]);
+  }]).select("id").single();
   if (error) throw new Error(error.message);
   revalidatePath("/appointments");
+  return data.id;
 }
 
 export async function updateAppointment(

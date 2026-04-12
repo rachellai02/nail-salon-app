@@ -46,9 +46,9 @@ export async function POST(req: NextRequest) {
       const payload = (message.button?.payload as string | undefined) ?? "";
       console.log(`[wa-webhook] button payload="${payload}" from="${from}"`);
 
-      if (payload.toLowerCase().includes("confirm")) {
+      if (payload.toLowerCase().includes("confirm") || isUUID(payload)) {
         await sendText(from, "Thanks and see you! 💅");
-        await markCustomerConfirmed(from);
+        await markCustomerConfirmed(from, isUUID(payload) ? payload : undefined);
       }
       // Edit Booking / Cancel Booking — no auto-reply, handle manually
     }
@@ -60,9 +60,24 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function markCustomerConfirmed(from: string) {
+function isUUID(s: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+async function markCustomerConfirmed(from: string, appointmentId?: string) {
   try {
     const supabase = supabaseAdmin();
+
+    // If we have the exact appointment ID, update directly
+    if (appointmentId) {
+      const { error } = await supabase
+        .from("appointments")
+        .update({ customer_confirmed: true })
+        .eq("id", appointmentId);
+      if (error) console.error("[wa-webhook] update error", error);
+      else console.log(`[wa-webhook] customer_confirmed=true for appt ${appointmentId} (direct)`);
+      return;
+    }
 
     // Use MYT (UTC+8) for date/time — same as the rest of the app
     const nowMYT   = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kuala_Lumpur" }));

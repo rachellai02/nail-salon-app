@@ -98,7 +98,7 @@ export function AppointmentFormDialog({
   const [deleting, setDeleting] = useState(false);
   const [sending,  setSending]  = useState(false);
   const [showReminderPrompt, setShowReminderPrompt] = useState(false);
-  const [pendingReminder, setPendingReminder] = useState<{ phone: string; customerName: string; date: string; time: string; pax: number } | null>(null);
+  const [pendingReminder, setPendingReminder] = useState<{ phone: string; customerName: string; date: string; time: string; pax: number; appointmentId: string } | null>(null);
 
   const defaultStart = editingAppointment
     ? editingAppointment.start_time.slice(0, 5)
@@ -151,6 +151,7 @@ export function AppointmentFormDialog({
             date: format(apptDateObj, "EEEE, d MMMM yyyy"),
             time: format(parse(data.start_time.slice(0, 5), "HH:mm", new Date()), "h:mm a"),
             pax: data.num_persons,
+            appointmentId: editingAppointment.id,
           });
           setShowReminderPrompt(true);
         } else {
@@ -159,7 +160,7 @@ export function AppointmentFormDialog({
         }
         return;
       } else {
-        await createAppointment(payload);
+        const newApptId = await createAppointment(payload);
         toast.success("Appointment added!");
 
         // Send immediate reminder if the day-before 10AM window has already passed
@@ -184,6 +185,7 @@ export function AppointmentFormDialog({
                   date: apptDate,
                   time: apptTime,
                   pax: data.num_persons,
+                  appointmentId: newApptId,
                 }),
               });
               if (res.ok) toast.success("Reminder sent via WhatsApp!");
@@ -469,6 +471,7 @@ export function AppointmentFormDialog({
                         date: apptDate,
                         time: apptTime,
                         pax: editingAppointment.num_persons,
+                        appointmentId: editingAppointment.id,
                       }),
                     });
                     const data = await res.json();

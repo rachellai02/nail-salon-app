@@ -230,6 +230,17 @@ export default function CalendarClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart]);
 
+  // Auto-refresh every 30s to pick up external changes (e.g. customer_confirmed via webhook)
+  useEffect(() => {
+    const id = setInterval(() => {
+      const from = format(rangeStart, "yyyy-MM-dd");
+      const to   = format(addDays(rangeStart, TOTAL_DAYS - 1), "yyyy-MM-dd");
+      getAppointmentsForRange(from, to).then(setAppointments).catch(console.error);
+    }, 30_000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStart]);
+
   // Scroll horizontally based on intent: today (initial / Today btn) or week start (arrows)
   useEffect(() => {
     if (scrollRef.current && colWidth > 0) {

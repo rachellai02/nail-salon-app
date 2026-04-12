@@ -98,6 +98,13 @@ export async function GET(req: NextRequest) {
                     { type: "text", parameter_name: "pax", text: String(appt.num_persons) },
                   ],
                 },
+                // Embed appointment ID as the "Confirm Booking" button payload (index 0)
+                {
+                  type: "button",
+                  sub_type: "quick_reply",
+                  index: "0",
+                  parameters: [{ type: "payload", payload: appt.id }],
+                },
               ],
             },
           }),

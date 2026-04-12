@@ -6,6 +6,7 @@ export type SendReminderPayload = {
   date: string;   // formatted display string e.g. "Sunday, 13 April 2026"
   time: string;   // formatted display string e.g. "10:00 AM"
   pax: number;
+  appointmentId?: string; // embedded in button payload so webhook can identify exact appointment
 };
 
 export async function POST(req: NextRequest) {
@@ -55,6 +56,13 @@ export async function POST(req: NextRequest) {
                   { type: "text", parameter_name: "pax", text: String(payload.pax) },
                 ],
               },
+              // Embed appointment ID as the "Confirm Booking" button payload (index 0)
+              ...(payload.appointmentId ? [{
+                type: "button",
+                sub_type: "quick_reply",
+                index: "0",
+                parameters: [{ type: "payload", payload: payload.appointmentId }],
+              }] : []),
             ],
           },
         }),
