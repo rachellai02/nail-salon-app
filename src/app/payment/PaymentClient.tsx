@@ -870,8 +870,10 @@ export default function PaymentClient({ categories, customers, packages, employe
                 <p className="text-sm font-medium text-gray-600">Payment type</p>
                 <div className="grid grid-cols-2 gap-2">
                   {PAYMENT_TYPES.map((type) => {
-                    const cartHasPackage = cart.some((item) => packages.find((p) => p.name === item.service.name && p.is_active));
-                    const disabled = type === "Package" && cartHasPackage;
+                    const hasActivePackage = customerPackages.some(
+                      (cp) => (cp.remaining_uses > 0 || (cp.remaining_credits ?? 0) > 0) && !cp.completed_at
+                    );
+                    const disabled = type === "Package" && (!selectedCustomer || !hasActivePackage);
                     return (
                       <button
                         key={type}

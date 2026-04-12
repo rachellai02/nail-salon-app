@@ -63,13 +63,17 @@ export async function POST(req: NextRequest) {
 async function markCustomerConfirmed(from: string) {
   try {
     const supabase = supabaseAdmin();
-    const today = new Date().toISOString().slice(0, 10);
-    const nowTime = new Date().toTimeString().slice(0, 8); // "HH:MM:SS"
+
+    // Use MYT (UTC+8) for date/time — same as the rest of the app
+    const nowMYT   = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kuala_Lumpur" }));
+    const pad      = (n: number) => String(n).padStart(2, "0");
+    const today    = `${nowMYT.getFullYear()}-${pad(nowMYT.getMonth() + 1)}-${pad(nowMYT.getDate())}`;
+    const nowTime  = `${pad(nowMYT.getHours())}:${pad(nowMYT.getMinutes())}:${pad(nowMYT.getSeconds())}`;
 
     // Normalise incoming phone digits
     const digits   = from.replace(/\D/g, "");
     const noPrefix = digits.startsWith("60") ? digits.slice(2) : digits.replace(/^0/, "");
-    console.log(`[wa-webhook] markCustomerConfirmed from="${from}" digits="${digits}" noPrefix="${noPrefix}" today="${today}"`);
+    console.log(`[wa-webhook] markCustomerConfirmed from="${from}" digits="${digits}" noPrefix="${noPrefix}" today="${today}" nowTime="${nowTime}"`);
 
     // Fetch today's + future appointments ordered by date then time
     const { data, error } = await supabase
