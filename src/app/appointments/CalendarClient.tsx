@@ -506,6 +506,7 @@ export default function CalendarClient() {
                           onClick={(e) => handleApptClick(appt, e)}
                         >
                           <p className="font-semibold leading-tight break-words whitespace-normal">
+                            {appt.customer_confirmed && <span title="Customer confirmed">✓ </span>}
                             {appt.customer_name}
                             <span className="font-normal opacity-70"> ×{appt.num_persons}</span>
                           </p>

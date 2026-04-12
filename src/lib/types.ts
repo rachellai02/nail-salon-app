@@ -79,6 +79,7 @@ export type Appointment = {
   num_persons: number;
   has_package: boolean;
   status: "confirmed" | "completed" | "cancelled";
+  customer_confirmed: boolean;
   created_at: string;
 };
 

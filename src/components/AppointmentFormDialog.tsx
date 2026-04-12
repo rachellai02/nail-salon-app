@@ -97,6 +97,8 @@ export function AppointmentFormDialog({
   const [loading,  setLoading]  = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sending,  setSending]  = useState(false);
+  const [showReminderPrompt, setShowReminderPrompt] = useState(false);
+  const [pendingReminder, setPendingReminder] = useState<{ phone: string; customerName: string; date: string; time: string; pax: number } | null>(null);
 
   const defaultStart = editingAppointment
     ? editingAppointment.start_time.slice(0, 5)
@@ -113,7 +115,7 @@ export function AppointmentFormDialog({
     watch,
     reset,
     control,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: {
@@ -141,6 +143,21 @@ export function AppointmentFormDialog({
       if (isEditing) {
         await updateAppointment(editingAppointment.id, payload);
         toast.success("Appointment updated");
+        if (payload.contact_number) {
+          const apptDateObj = new Date(payload.appointment_date + "T00:00:00");
+          setPendingReminder({
+            phone: payload.contact_number,
+            customerName: data.customer_name,
+            date: format(apptDateObj, "EEEE, d MMMM yyyy"),
+            time: format(parse(data.start_time.slice(0, 5), "HH:mm", new Date()), "h:mm a"),
+            pax: data.num_persons,
+          });
+          setShowReminderPrompt(true);
+        } else {
+          reset();
+          onClose();
+        }
+        return;
       } else {
         await createAppointment(payload);
         toast.success("Appointment added!");
@@ -183,6 +200,29 @@ export function AppointmentFormDialog({
     }
   }
 
+  async function sendPendingReminder() {
+    if (!pendingReminder) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/send-reminder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pendingReminder),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Failed to send");
+      toast.success("Reminder sent via WhatsApp!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send reminder");
+    } finally {
+      setSending(false);
+      setShowReminderPrompt(false);
+      setPendingReminder(null);
+      reset();
+      onClose();
+    }
+  }
+
   async function handleDelete() {
     if (!editingAppointment) return;
     setDeleting(true);
@@ -203,6 +243,7 @@ export function AppointmentFormDialog({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
       <DialogContent className="w-[min(50dvw,calc(100dvw-2rem))] max-w-none flex flex-col max-h-[90dvh]">
         <DialogHeader>
@@ -407,7 +448,7 @@ export function AppointmentFormDialog({
               <Button
                 type="button"
                 variant="outline"
-                disabled={sending}
+                disabled={sending || isDirty}
                 onClick={async () => {
                   setSending(true);
                   try {
@@ -456,5 +497,38 @@ export function AppointmentFormDialog({
           </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Resend reminder prompt after saving */}
+    <Dialog open={showReminderPrompt} onOpenChange={(open) => {
+      if (!open) {
+        setShowReminderPrompt(false);
+        setPendingReminder(null);
+        reset();
+        onClose();
+      }
+    }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Send Reminder?</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Appointment updated. Would you like to resend the WhatsApp reminder to the customer?
+        </p>
+        <DialogFooter className="gap-2 pt-2">
+          <Button variant="outline" onClick={() => {
+            setShowReminderPrompt(false);
+            setPendingReminder(null);
+            reset();
+            onClose();
+          }}>
+            No, Skip
+          </Button>
+          <Button onClick={sendPendingReminder} disabled={sending}>
+            {sending ? "Sending…" : "Send Reminder"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>  
   );
 }

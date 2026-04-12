@@ -459,3 +459,10 @@ CREATE TABLE IF NOT EXISTS transaction_employee_splits (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(transaction_id, employee_id)
 );
+
+-- -------------------------------------------------------
+-- MIGRATION: Customer WhatsApp confirmation flag
+-- Run this in Supabase SQL Editor.
+-- -------------------------------------------------------
+ALTER TABLE appointments
+  ADD COLUMN IF NOT EXISTS customer_confirmed BOOLEAN NOT NULL DEFAULT FALSE;
