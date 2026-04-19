@@ -16,8 +16,9 @@ import {
 import { getAppointmentsForRange } from "@/lib/actions";
 import { Appointment } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Plus, ChevronDown } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, ChevronDown, Info } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AppointmentFormDialog } from "@/components/AppointmentFormDialog";
 
 // ─── Calendar config ──────────────────────────────────────────
@@ -182,16 +183,18 @@ export default function CalendarClient() {
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState<DialogState>({ mode: "closed" });
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTarget = useRef<'today' | 'week'>('today');
   const [colWidth, setColWidth] = useState(140);
 
-  // Measure scroll container width so exactly 7 columns fit in view
+  // Measure scroll container width — 3 visible cols on mobile (<500px), 7 on desktop
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      setColWidth(Math.floor((entry.contentRect.width - SIDEBAR_WIDTH) / 7));
+      const w = entry.contentRect.width;
+      setColWidth(Math.floor((w - SIDEBAR_WIDTH) / (w < 500 ? 3 : 7)));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -282,57 +285,54 @@ export default function CalendarClient() {
     <div className="flex flex-col" style={{ height: "calc(100vh - 148px)" }}>
 
       {/* ── Top controls ──────────────────────────────── */}
-      <div className="relative flex items-center justify-between mb-4 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">Appointments</h1>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center mb-4 flex-shrink-0 gap-2">
+
+        {/* Left: title */}
+        <div className="flex items-center">
+          <h1 className="text-2xl font-bold hidden sm:block">Appointments</h1>
         </div>
-        {/* Clickable month/year label — centred */}
+
+        {/* Centre: month/year picker */}
         <Popover open={pickerOpen} onOpenChange={(v) => { setPickerOpen(v); if (v) setPickerYear(currentYear); }}>
           <PopoverTrigger
-            className="flex items-center gap-1 text-gray-900 text-2xl font-bold px-2 py-1 rounded-md hover:bg-gray-100 transition-colors cursor-pointer absolute left-1/2 -translate-x-1/2"
+            className="flex items-center gap-1 text-gray-900 text-xl sm:text-2xl font-bold px-2 py-1 rounded-md hover:bg-gray-100 transition-colors cursor-pointer"
           >
             {monthLabel}
             <ChevronDown className="h-3.5 w-3.5" />
           </PopoverTrigger>
-            <PopoverContent className="w-72 p-3" align="center">
-              {/* Year row */}
-              <div className="flex items-center justify-between mb-3">
-                <button
-                  className="p-1 rounded hover:bg-gray-100"
-                  onClick={() => setPickerYear(y => y - 1)}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="text-sm font-semibold">{pickerYear}</span>
-                <button
-                  className="p-1 rounded hover:bg-gray-100"
-                  onClick={() => setPickerYear(y => y + 1)}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-              {/* Month grid */}
-              <div className="grid grid-cols-4 gap-1">
-                {MONTHS.map((m, i) => {
-                  const isActive = pickerYear === currentYear && i === currentMonth;
-                  return (
-                    <button
-                      key={m}
-                      onClick={() => jumpToMonth(pickerYear, i)}
-                      className={`rounded-md py-1.5 text-xs font-medium transition-colors ${
-                        isActive
-                          ? "bg-pink-500 text-white"
-                          : "hover:bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  );
-                })}
-              </div>
-            </PopoverContent>
-          </Popover>
-        <div className="flex items-center gap-2">
+          <PopoverContent className="w-72 p-3" align="center">
+            {/* Year row */}
+            <div className="flex items-center justify-between mb-3">
+              <button className="p-1 rounded hover:bg-gray-100" onClick={() => setPickerYear(y => y - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-sm font-semibold">{pickerYear}</span>
+              <button className="p-1 rounded hover:bg-gray-100" onClick={() => setPickerYear(y => y + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            {/* Month grid */}
+            <div className="grid grid-cols-4 gap-1">
+              {MONTHS.map((m, i) => {
+                const isActive = pickerYear === currentYear && i === currentMonth;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => jumpToMonth(pickerYear, i)}
+                    className={`rounded-md py-1.5 text-xs font-medium transition-colors ${
+                      isActive ? "bg-pink-500 text-white" : "hover:bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* Right: nav + action buttons */}
+        <div className="flex items-center gap-2 justify-end">
           <Button
             variant="outline"
             size="sm"
@@ -350,11 +350,20 @@ export default function CalendarClient() {
             <ChevronRight className="h-4 w-4" />
           </Button>
           <Button
-            className="ml-2"
+            variant="outline"
+            size="icon"
+            className="sm:hidden"
+            onClick={() => setLegendOpen(true)}
+            title="Legend"
+          >
+            <Info className="h-4 w-4" />
+          </Button>
+          <Button
+            className="ml-1"
             onClick={() => setDialog({ mode: "add", date: new Date(), startTime: "10:00" })}
           >
-            <Plus className="h-4 w-4 mr-1" />
-            New Appointment
+            <Plus className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">New Appointment</span>
           </Button>
         </div>
       </div>
@@ -362,8 +371,8 @@ export default function CalendarClient() {
       {/* ── Calendar + Legend ─────────────────────────── */}
       <div className="flex-1 flex gap-3 min-h-0">
 
-      {/* Legend */}
-      <div className="self-start flex-shrink-0 w-40 border rounded-xl bg-white shadow-sm p-3 flex flex-col gap-2 text-xs">
+      {/* Legend — desktop sidebar only */}
+      <div className="hidden sm:flex self-start flex-shrink-0 w-40 border rounded-xl bg-white shadow-sm p-3 flex-col gap-2 text-xs">
         <p className="font-semibold text-gray-500 uppercase tracking-wide text-[10px] mb-1">Legend</p>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-sm flex-shrink-0 bg-pink-100 border-l-[3px] border-pink-400" />
@@ -529,7 +538,7 @@ export default function CalendarClient() {
                               {appt.start_time.slice(0, 5)} – {appt.end_time.slice(0, 5)}
                             </p>
                           )}
-                          {appt.notes && height >= SLOT_HEIGHT * 2 && (
+                          {appt.notes && (
                             <p className="leading-tight opacity-50 break-words whitespace-normal mt-0.5">
                               {appt.notes}
                             </p>
@@ -548,6 +557,33 @@ export default function CalendarClient() {
       </div>{/* end calendar + legend row */}
 
       {/* ── Dialog ────────────────────────────────────── */}
+      {/* Legend dialog — mobile */}
+      <Dialog open={legendOpen} onOpenChange={setLegendOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Legend</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 text-sm">
+            <div className="flex items-center gap-3">
+              <span className="w-4 h-4 rounded-sm flex-shrink-0 bg-pink-100 border-l-[3px] border-pink-400" />
+              <span className="text-gray-700">Package Customer</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-4 h-4 rounded-sm flex-shrink-0 bg-blue-100 border-l-[3px] border-blue-400" />
+              <span className="text-gray-700">Walk-in Customer</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-4 h-4 rounded-sm flex-shrink-0 bg-emerald-100 border-l-[3px] border-emerald-400" />
+              <span className="text-gray-700">Completed</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-4 h-4 rounded-sm flex-shrink-0 bg-gray-100 border-l-[3px] border-gray-400" />
+              <span className="text-gray-700">Cancelled</span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {dialog.mode !== "closed" && (
         <AppointmentFormDialog
           open
