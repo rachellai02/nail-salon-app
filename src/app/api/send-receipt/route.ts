@@ -38,6 +38,8 @@ export type SendReceiptPayload = {
   extraChangeGiven?: number | null;
   packageDeductions?: PackageDeduction[];
   customerPackages?: CustomerPackageInfo[];
+  customerCode?: string | number | null;
+  customerPhone?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -96,7 +98,10 @@ function buildReceiptHtml(data: SendReceiptPayload): string {
     receiptNo, date, items, paymentType, total, cashReceived, changeGiven,
     extraPaymentType, extraTotal, extraCashReceived, extraChangeGiven,
     packageDeductions, transactionBy, customerPackages,
+    customerName: topCustomerName, customerPhone: topCustomerPhone, customerCode: topCustomerCode,
+    phone: topPhone,
   } = data;
+  const displayPhone = topCustomerPhone || topPhone;
 
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
@@ -192,6 +197,14 @@ function buildReceiptHtml(data: SendReceiptPayload): string {
               </div>`).join("")
           }
         </div>`).join("")}`;
+  } else if (topCustomerName || topCustomerPhone) {
+    packagesHtml = `
+      <br/>
+      <div class="divider"></div>
+      <br/>
+      ${topCustomerCode != null ? `<p class="bold">Customer ID: ${escHtml(String(topCustomerCode))}</p>` : ""}
+      ${topCustomerName ? `<p class="bold">Customer Name: ${escHtml(topCustomerName)}</p>` : ""}
+      ${displayPhone ? `<p class="bold">Phone Number: ${escHtml(displayPhone)}</p>` : ""}`;
   }
 
   return `<!DOCTYPE html>

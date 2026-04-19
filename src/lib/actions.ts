@@ -1341,7 +1341,9 @@ export async function deductPackageUse(
   creditsUsed?: number,
   creditServices?: { service_name: string; price: number }[],
   count?: number,
-): Promise<void> {
+): Promise<string[]> {
+  let insertedIds: string[] = [];
+
   if (creditServices && creditServices.length > 0) {
     // Credit-type package deduction with per-service breakdown
     const totalCredits = creditServices.reduce((sum, s) => sum + s.price, 0);
@@ -1375,8 +1377,9 @@ export async function deductPackageUse(
       used_at: timestamp,
       notes: notes ?? null,
     }));
-    const { error: logError } = await supabase.from("package_usage_logs").insert(logRows);
+    const { data: insertedLogs, error: logError } = await supabase.from("package_usage_logs").insert(logRows).select("id");
     if (logError) throw new Error(logError.message);
+    insertedIds = (insertedLogs ?? []).map((r) => (r as { id: string }).id);
   } else if (creditsUsed !== undefined) {
     // Credit-type package deduction (legacy — no service breakdown)
     if (creditsUsed <= 0) throw new Error("Credits used must be greater than 0");
@@ -1399,15 +1402,16 @@ export async function deductPackageUse(
       .eq("id", customerPackageId);
     if (updateError) throw new Error(updateError.message);
 
-    const { error: logError } = await supabase.from("package_usage_logs").insert([{
+    const { data: insertedLogs, error: logError } = await supabase.from("package_usage_logs").insert([{
       customer_package_id: customerPackageId,
       customer_package_item_id: null,
       service_name: null,
       credits_used: creditsUsed,
       used_at: usedAt ?? new Date().toISOString(),
       notes: notes ?? null,
-    }]);
+    }]).select("id");
     if (logError) throw new Error(logError.message);
+    insertedIds = (insertedLogs ?? []).map((r) => (r as { id: string }).id);
   } else if (customerPackageItemId) {
     // Item-based deduction (new packages with items)
     const deductCount = Math.max(1, Math.round(count ?? 1));
@@ -1444,8 +1448,9 @@ export async function deductPackageUse(
       used_at: timestamp,
       notes: notes ?? null,
     }));
-    const { error: logError } = await supabase.from("package_usage_logs").insert(logRows);
+    const { data: insertedLogs, error: logError } = await supabase.from("package_usage_logs").insert(logRows).select("id");
     if (logError) throw new Error(logError.message);
+    insertedIds = (insertedLogs ?? []).map((r) => (r as { id: string }).id);
   } else {
     // Legacy: deduct from the whole package (packages without items)
     const { data: cp, error: fetchError } = await supabase
@@ -1464,17 +1469,19 @@ export async function deductPackageUse(
 
     if (updateError) throw new Error(updateError.message);
 
-    const { error: logError } = await supabase.from("package_usage_logs").insert([{
+    const { data: insertedLogs, error: logError } = await supabase.from("package_usage_logs").insert([{
       customer_package_id: customerPackageId,
       customer_package_item_id: null,
       service_name: null,
       used_at: usedAt ?? new Date().toISOString(),
       notes: notes ?? null,
-    }]);
+    }]).select("id");
     if (logError) throw new Error(logError.message);
+    insertedIds = (insertedLogs ?? []).map((r) => (r as { id: string }).id);
   }
 
   revalidatePath("/packages/customers");
+  return insertedIds;
 }
 
 export async function getUsageLogs(customerPackageId: string) {
@@ -1486,6 +1493,71 @@ export async function getUsageLogs(customerPackageId: string) {
 
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+export async function reverseDeductions(logIds: string[]): Promise<void> {
+  if (logIds.length === 0) return;
+
+  const { data: logs, error } = await supabase
+    .from("package_usage_logs")
+    .select("id, customer_package_id, customer_package_item_id, credits_used")
+    .in("id", logIds);
+
+  if (error || !logs || logs.length === 0) return;
+
+  // Group by type
+  const creditRestores = new Map<string, number>(); // packageId → credits to add back
+  const itemRestores = new Map<string, number>();   // itemId → uses to add back
+  const itemToPackage = new Map<string, string>();  // itemId → packageId
+  const legacyRestores = new Map<string, number>(); // packageId → uses to add back
+
+  for (const log of logs as { id: string; customer_package_id: string; customer_package_item_id: string | null; credits_used: number | null }[]) {
+    if (log.credits_used != null) {
+      creditRestores.set(log.customer_package_id, (creditRestores.get(log.customer_package_id) ?? 0) + log.credits_used);
+    } else if (log.customer_package_item_id) {
+      itemRestores.set(log.customer_package_item_id, (itemRestores.get(log.customer_package_item_id) ?? 0) + 1);
+      itemToPackage.set(log.customer_package_item_id, log.customer_package_id);
+    } else {
+      legacyRestores.set(log.customer_package_id, (legacyRestores.get(log.customer_package_id) ?? 0) + 1);
+    }
+  }
+
+  // Restore credits
+  for (const [pkgId, amount] of creditRestores) {
+    const { data: cp } = await supabase.from("customer_packages").select("remaining_credits").eq("id", pkgId).single();
+    if (cp) {
+      await supabase.from("customer_packages").update({ remaining_credits: (cp.remaining_credits ?? 0) + amount }).eq("id", pkgId);
+    }
+  }
+
+  // Restore item-based uses
+  const pkgIdsToRecompute = new Set<string>();
+  for (const [itemId, countToRestore] of itemRestores) {
+    const { data: item } = await supabase.from("customer_package_items").select("remaining_uses").eq("id", itemId).single();
+    if (item) {
+      await supabase.from("customer_package_items").update({ remaining_uses: item.remaining_uses + countToRestore }).eq("id", itemId);
+      const pkgId = itemToPackage.get(itemId);
+      if (pkgId) pkgIdsToRecompute.add(pkgId);
+    }
+  }
+  for (const pkgId of pkgIdsToRecompute) {
+    const { data: allItems } = await supabase.from("customer_package_items").select("remaining_uses").eq("customer_package_id", pkgId);
+    const newTotal = (allItems ?? []).reduce((sum: number, i: { remaining_uses: number }) => sum + i.remaining_uses, 0);
+    await supabase.from("customer_packages").update({ remaining_uses: newTotal }).eq("id", pkgId);
+  }
+
+  // Restore legacy uses
+  for (const [pkgId, countToRestore] of legacyRestores) {
+    const { data: cp } = await supabase.from("customer_packages").select("remaining_uses").eq("id", pkgId).single();
+    if (cp) {
+      await supabase.from("customer_packages").update({ remaining_uses: (cp.remaining_uses ?? 0) + countToRestore }).eq("id", pkgId);
+    }
+  }
+
+  // Delete the log entries
+  await supabase.from("package_usage_logs").delete().in("id", logIds);
+
+  revalidatePath("/packages/customers");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1795,11 +1867,27 @@ export async function getTransactionsByMonth(year: number, month: number): Promi
 
 export async function voidTransaction(id: string): Promise<void> {
   if (!UUID_REGEX.test(id)) throw new Error("Invalid transaction id");
+
+  // Fetch the transaction to check for package usage log IDs to reverse
+  const { data: tx, error: fetchError } = await supabaseAdmin
+    .from("sales_transactions")
+    .select("receipt_snapshot")
+    .eq("id", id)
+    .single();
+  if (fetchError) throw new Error(fetchError.message);
+
   const { error } = await supabaseAdmin
     .from("sales_transactions")
     .update({ is_voided: true })
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  // Restore package deductions linked to this transaction
+  const logIds: string[] = tx?.receipt_snapshot?.packageUsageLogIds ?? [];
+  if (logIds.length > 0) {
+    await reverseDeductions(logIds);
+  }
+
   revalidatePath("/sales");
 }
 

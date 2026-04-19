@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { ReceiptView } from "@/components/ReceiptView";
 import { voidTransaction, deleteTransaction, getTransactionContributors } from "@/lib/actions";
+import type { SendReceiptPayload } from "@/app/api/send-receipt/route";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Receipt, Trash2, Users } from "lucide-react";
 import SalesSummaryClient from "./SalesSummaryClient";
@@ -66,6 +67,68 @@ export default function SalesClient({ transactions, year, month, summaryTransact
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [splitTx, setSplitTx] = useState<Transaction | null>(null);
+  const [sendingReceipt, setSendingReceipt] = useState(false);
+
+  async function handleSendToCustomer(tx: Transaction) {
+    if (!tx.customer_phone) return;
+    setSendingReceipt(true);
+    try {
+      const snap = tx.receipt_snapshot;
+      const payload: SendReceiptPayload = {
+        phone: tx.customer_phone,
+        customerName: tx.customer_name ?? "Customer",
+        receiptNo: tx.receipt_no,
+        date: new Date(tx.transacted_at).toLocaleString("en-MY", {
+          day: "2-digit", month: "2-digit", year: "numeric",
+          hour: "2-digit", minute: "2-digit", hour12: true,
+        }),
+        transactionBy: snap?.transactionBy,
+        items: (Array.isArray(tx.items) ? tx.items : []).map((i) => ({
+          qty: i.qty,
+          name: i.service_name,
+          subtotal: i.subtotal,
+        })),
+        paymentType: tx.payment_type,
+        total: Number(tx.total),
+        cashReceived: tx.cash_received ?? null,
+        changeGiven: tx.change_given ?? null,
+        extraPaymentType: snap?.extraPaymentType,
+        extraTotal: snap?.extraTotal,
+        extraCashReceived: snap?.extraCashReceived ?? null,
+        extraChangeGiven: snap?.extraChangeGiven ?? null,
+        packageDeductions: snap?.packageDeductions,
+        customerPackages: snap?.customerPackages?.map((cp) => ({
+          name: cp.package?.name ?? "Package",
+          packageType: cp.package?.package_type ?? "services",
+          remainingCredits: cp.remaining_credits ?? undefined,
+          items: cp.items?.map((i) => ({
+            service_name: i.service_name,
+            remaining_uses: i.remaining_uses,
+            total_uses: i.total_uses,
+          })),
+          customerCode: cp.customer?.customer_code,
+          customerName: cp.customer?.name,
+          customerPhone: cp.customer?.contact_number,
+        })),
+      };
+      const res = await fetch("/api/send-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const { error } = await res.json() as { error: string };
+        toast.error(`WhatsApp send failed: ${error}`);
+      } else {
+        toast.success(`Receipt sent to ${tx.customer_name} via WhatsApp.`);
+        setReceiptTx(null);
+      }
+    } catch {
+      toast.error("WhatsApp send failed.");
+    } finally {
+      setSendingReceipt(false);
+    }
+  }
   const [splitContributors, setSplitContributors] = useState<Record<string, { employee_id: string; display: string }[]>>({});
 
   const isPackageSale = (tx: Transaction) => tx.payment_type?.trim().toLowerCase().startsWith("package sale");
@@ -504,6 +567,11 @@ export default function SalesClient({ transactions, year, month, summaryTransact
             This will mark receipt <span className="font-mono font-semibold">{voidTarget?.receipt_no}</span> as voided
             and exclude it from all sales totals. This cannot be undone.
           </p>
+          {(voidTarget?.receipt_snapshot?.packageUsageLogIds?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              This transaction used a customer package. Voiding will <strong>restore all deducted package uses</strong> back to the customer&apos;s balance.
+            </div>
+          )}
           <div className="flex gap-2 justify-end">
             <Button variant="outline" disabled={voiding} onClick={() => setVoidTarget(null)}>
               Cancel
@@ -561,20 +629,12 @@ export default function SalesClient({ transactions, year, month, summaryTransact
                 extraChangeGiven={receiptTx.receipt_snapshot?.extraChangeGiven}
                 packageDeductions={receiptTx.receipt_snapshot?.packageDeductions}
                 transactionBy={receiptTx.receipt_snapshot?.transactionBy}
+                customerName={receiptTx.customer_name ?? undefined}
+                customerPhone={receiptTx.customer_phone ?? undefined}
+                onSend={receiptTx.customer_phone ? () => void handleSendToCustomer(receiptTx) : undefined}
+                sendLabel={sendingReceipt ? "Sending…" : "Send to Customer via WhatsApp"}
+                sendDisabled={sendingReceipt}
               />
-              {receiptTx.is_voided && (
-                <Button
-                  className="w-full"
-                  onClick={() => {
-                    const name = receiptTx.customer_name ?? "Unknown";
-                    const phone = receiptTx.customer_phone ?? "No phone";
-                    toast.success(`Voided receipt resent to ${name} (${phone}).`);
-                    setReceiptTx(null);
-                  }}
-                >
-                  Resend to Customer
-                </Button>
-              )}
             </>
           )}
         </DialogContent>

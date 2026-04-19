@@ -21,7 +21,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   customerPackage: CustomerPackage | null;
-  onDeducted?: (serviceNames: string[], creditTopup?: number) => void;
+  onDeducted?: (serviceNames: string[], creditTopup?: number, logIds?: string[]) => void;
   cartServiceNames?: string[];
   cartItems?: { service_name: string; price: string; qty: string }[];
 };
@@ -144,9 +144,11 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
     try {
       const usedAtIso = usedDateTime ? new Date(usedDateTime).toISOString() : undefined;
       let deductedNames: string[] = [];
+      const allLogIds: string[] = [];
       if (isCredit) {
         const services = creditServices.map((s) => ({ service_name: s.service_name.trim(), price: parseFloat(s.price) }));
-        await deductPackageUse(customerPackage.id, null, composedNotes, usedAtIso, undefined, services);
+        const logIds = await deductPackageUse(customerPackage.id, null, composedNotes, usedAtIso, undefined, services);
+        allLogIds.push(...logIds);
         const newRemaining = Math.max(0, (customerPackage.remaining_credits ?? 0) - totalCredits);
         const topupMsg = cashTopup > 0 ? ` + ${cashTopup} cash top-up` : "";
         toast.success(`${totalCredits} deducted ${topupMsg}. ${newRemaining} credits remaining.`);
@@ -154,17 +156,19 @@ export function DeductUseDialog({ open, onClose, customerPackage, onDeducted, ca
       } else if (hasItems) {
         for (const [itemId, cnt] of itemCounts) {
           if (cnt <= 0) continue;
-          await deductPackageUse(customerPackage.id, itemId, composedNotes, usedAtIso, undefined, undefined, cnt);
+          const logIds = await deductPackageUse(customerPackage.id, itemId, composedNotes, usedAtIso, undefined, undefined, cnt);
+          allLogIds.push(...logIds);
           const svcName = items.find((i) => i.id === itemId)?.service_name ?? "";
           for (let x = 0; x < cnt; x++) deductedNames.push(svcName);
         }
         toast.success(`Deducted ${totalUsesToDeduct} use${totalUsesToDeduct !== 1 ? "s" : ""}: ${[...new Set(deductedNames)].join(", ")}`);
       } else {
-        await deductPackageUse(customerPackage.id, null, composedNotes, usedAtIso, undefined, undefined, legacyCount);
+        const logIds = await deductPackageUse(customerPackage.id, null, composedNotes, usedAtIso, undefined, undefined, legacyCount);
+        allLogIds.push(...logIds);
         toast.success(`${legacyCount} use${legacyCount !== 1 ? "s" : ""} deducted. ${(customerPackage.remaining_uses ?? legacyCount) - legacyCount} remaining.`);
         for (let x = 0; x < legacyCount; x++) deductedNames.push("");
       }
-      onDeducted?.(deductedNames, isCredit && cashTopup > 0 ? cashTopup : undefined);
+      onDeducted?.(deductedNames, isCredit && cashTopup > 0 ? cashTopup : undefined, allLogIds);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to deduct use");

@@ -42,10 +42,7 @@ export default function LoginPage() {
       <div className="flex min-h-full items-center justify-center py-8 px-4">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 w-full max-w-sm p-6">
         <div className="mb-5 text-center">
-          <h1 className="text-3xl font-bold ">Prestige Nail Parlour</h1>
-          <p className="text-m text-gray-500 mt-1">
-            <i>by Chusen</i>
-          </p>
+          <h1 className="text-3xl font-bold">Prestige <i className="text-2xl">by Chusen</i></h1>
           <br />
           <p className="text-2xl font-bold">
             Management System

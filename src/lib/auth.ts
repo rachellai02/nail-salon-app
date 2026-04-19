@@ -9,7 +9,7 @@ const SECRET = new TextEncoder().encode(
 
 const USERS = [
   { username: "admin", password: "chusen661477", role: "admin" as const },
-  { username: "prestige", password: "002338", role: "employee" as const },
+  { username: "chusen", password: "661477", role: "employee" as const },
 ];
 
 export type Role = "admin" | "employee";

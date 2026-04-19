@@ -15,7 +15,7 @@ import { CustomerFormDialog } from "@/components/CustomerFormDialog";
 import { ReceiptView } from "@/components/ReceiptView";
 import { SellPackageDialog } from "@/components/SellPackageDialog";
 import { DeductUseDialog } from "@/components/DeductUseDialog";
-import { createTransaction, getPackagesByCustomerId, getNextReceiptNo } from "@/lib/actions";
+import { createTransaction, getPackagesByCustomerId, getNextReceiptNo, reverseDeductions } from "@/lib/actions";
 import { X, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -113,6 +113,7 @@ export default function PaymentClient({ categories, customers, packages, employe
   const lastCreditTopupRef = useRef<number>(0);
   const packageSoldInFlowRef = useRef(false);
   const isTopupDeductRef = useRef(false);
+  const pendingDeductionLogIdsRef = useRef<string[]>([]);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [extraCreditTopup, setExtraCreditTopup] = useState<number | null>(null);
   const [extraTopupPackage, setExtraTopupPackage] = useState<CustomerPackage | null>(null);
@@ -182,6 +183,7 @@ export default function PaymentClient({ categories, customers, packages, employe
     setExtraCashReceived("");
     setPackageDeductions([]);
     packageSoldInFlowRef.current = false;
+    pendingDeductionLogIdsRef.current = [];
     setDialogOpen(true);
   }
 
@@ -459,6 +461,48 @@ export default function PaymentClient({ categories, customers, packages, employe
     }
   }
 
+  async function handleSaveWithoutSend() {
+    const isPackagePayment = packageSoldInFlowRef.current;
+    try {
+      await createTransaction({
+        receipt_no: receiptNo,
+        payment_type: isPackagePayment
+          ? `Package Sale - ${extraPaymentType ?? paymentType ?? ""}`
+          : extraPaymentType ? `Package + ${extraPaymentType}` : (paymentType ?? ""),
+        total,
+        cash_received: extraPaymentType === "Cash" && extraCashReceived
+          ? parseFloat(extraCashReceived)
+          : paymentType === "Cash" && cashReceived ? parseFloat(cashReceived) : null,
+        change_given: extraPaymentType === "Cash" && extraCashReceived
+          ? Math.max(0, parseFloat(extraCashReceived) - extraTotal)
+          : paymentType === "Cash" && cashReceived ? Math.max(0, parseFloat(cashReceived) - total) : null,
+        customer_id: selectedCustomer?.id ?? null,
+        customer_name: selectedCustomer?.name || null,
+        customer_phone: selectedCustomer?.contact_number || null,
+        items: cart.map((item) => ({
+          service_name: item.service.name,
+          qty: parseFloat(item.qty) || 1,
+          unit_price: parseFloat(item.price) || 0,
+          subtotal: (parseFloat(item.qty) || 1) * (parseFloat(item.price) || 0),
+        })),
+        receipt_snapshot: {
+          customerPackages: customerPackages.length > 0 ? customerPackages : undefined,
+          extraPaymentType: extraPaymentType ?? undefined,
+          extraTotal: (extraCartItems.length > 0 || extraCreditTopup !== null) ? extraTotal : undefined,
+          extraCashReceived: extraPaymentType === "Cash" && extraCashReceived ? parseFloat(extraCashReceived) : undefined,
+          extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
+          packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
+          transactionBy: selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined,
+          packageUsageLogIds: pendingDeductionLogIdsRef.current.length > 0 ? [...pendingDeductionLogIdsRef.current] : undefined,
+        },
+      });
+    } catch { /* non-blocking */ }
+    toast.success("Receipt saved.");
+    setDialogOpen(false);
+    setSelectedCustomer(null);
+    clearCart();
+  }
+
   async function handleDoSend() {
     const isPackagePayment = packageSoldInFlowRef.current;
     setSending(true);
@@ -492,6 +536,7 @@ export default function PaymentClient({ categories, customers, packages, employe
           extraChangeGiven: extraPaymentType === "Cash" && extraCashReceived ? Math.max(0, parseFloat(extraCashReceived) - extraTotal) : undefined,
           packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
           transactionBy: selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined,
+          packageUsageLogIds: pendingDeductionLogIdsRef.current.length > 0 ? [...pendingDeductionLogIdsRef.current] : undefined,
         },
       });
     } catch {
@@ -535,6 +580,7 @@ export default function PaymentClient({ categories, customers, packages, employe
             customerName: cp.customer?.name,
             customerPhone: cp.customer?.contact_number,
           })) : undefined,
+          customerCode: selectedCustomer?.customer_code ?? undefined,
         };
         const res = await fetch("/api/send-receipt", {
           method: "POST",
@@ -1311,6 +1357,14 @@ export default function PaymentClient({ categories, customers, packages, employe
             <>
               <DialogHeader>
                 <DialogTitle>Receipt Preview</DialogTitle>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveWithoutSend()}
+                  className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100 transition-opacity"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
               </DialogHeader>
 
               {selectedCustomer && (
@@ -1357,6 +1411,9 @@ export default function PaymentClient({ categories, customers, packages, employe
                 customerPackages={customerPackages.length > 0 ? customerPackages : undefined}
                 packageDeductions={packageDeductions.length > 0 ? packageDeductions : undefined}
                 transactionBy={selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined}
+                customerName={selectedCustomer?.name}
+                customerPhone={selectedCustomer?.contact_number}
+                customerCode={selectedCustomer?.customer_code ?? null}
                 hideDownloadButton={true}
               />
 
@@ -1401,10 +1458,11 @@ export default function PaymentClient({ categories, customers, packages, employe
       <DeductUseDialog
         open={deductingPackage !== null}
         onClose={() => void handleDeductClose()}
-        onDeducted={(names, topup) => {
+        onDeducted={(names, topup, logIds) => {
         lastDeductedNamesRef.current = names;
         lastCreditTopupRef.current = topup ?? 0;
         setDeductedServiceNames((prev) => [...prev, ...names]);
+        if (logIds) pendingDeductionLogIdsRef.current.push(...logIds);
         // Compute amount deducted from this package
         const pkgName = deductingPackage?.package?.name ?? "Package";
         const isCredit = deductingPackage?.package?.package_type === "credit";
@@ -1498,7 +1556,30 @@ export default function PaymentClient({ categories, customers, packages, employe
           <p className="text-sm text-gray-600">The current payment will be discarded. Are you sure?</p>
           <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setCloseConfirmOpen(false)}>Keep editing</Button>
-            <Button variant="destructive" onClick={() => { setCloseConfirmOpen(false); setDialogOpen(false); }}>Discard payment</Button>
+            <Button variant="destructive" onClick={() => {
+              const idsToReverse = [...pendingDeductionLogIdsRef.current];
+              pendingDeductionLogIdsRef.current = [];
+              setCloseConfirmOpen(false);
+              setDialogOpen(false);
+              if (idsToReverse.length > 0) {
+                void reverseDeductions(idsToReverse).then(() => {
+                  if (selectedCustomer) {
+                    getPackagesByCustomerId(selectedCustomer.id)
+                      .then((pkgs) => {
+                        const active = pkgs.filter(
+                          (p) => !p.completed_at && (
+                            p.package?.package_type === "credit"
+                              ? (p.remaining_credits ?? 0) > 0
+                              : p.remaining_uses > 0
+                          )
+                        );
+                        setCustomerPackages(active);
+                      })
+                      .catch(() => {});
+                  }
+                });
+              }
+            }}>Discard payment</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

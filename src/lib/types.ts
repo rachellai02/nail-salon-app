@@ -173,6 +173,7 @@ export type ReceiptSnapshot = {
   extraChangeGiven?: number | null;
   packageDeductions?: { packageName: string; amount: number }[];
   transactionBy?: string;
+  packageUsageLogIds?: string[];
 };
 
 export type Transaction = {

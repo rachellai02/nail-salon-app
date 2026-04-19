@@ -37,6 +37,7 @@ body { margin: 0; padding: 0; background: white; }
 .mt-1 { margin-top: 4px; }
 .space-y-0\\.5 > * + * { margin-top: 2px; }
 .space-y-2 > * + * { margin-top: 8px; }
+.p-5 { padding: 20px; }
 .bg-white { background-color: white; }
 .relative { position: relative; }
 .absolute { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
@@ -78,6 +79,12 @@ type ReceiptViewProps = {
   transactionBy?: string;
   hideDownloadButton?: boolean;
   pdfTriggerRef?: { current: ((targetWin?: Window) => void) | null };
+  customerName?: string;
+  customerPhone?: string;
+  customerCode?: string | number | null;
+  onSend?: () => void;
+  sendLabel?: string;
+  sendDisabled?: boolean;
 };
 
 export function ReceiptView({
@@ -98,6 +105,12 @@ export function ReceiptView({
   transactionBy,
   hideDownloadButton,
   pdfTriggerRef,
+  customerName,
+  customerPhone,
+  customerCode,
+  onSend,
+  sendLabel,
+  sendDisabled,
 }: ReceiptViewProps) {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
@@ -122,7 +135,8 @@ export function ReceiptView({
   return (
     <div className="space-y-3">
     <div className="relative" ref={printRef}>
-      <div className="font-mono border rounded-lg p-5 bg-white space-y-2 max-h-[60vh] overflow-y-auto" style={{ fontSize: 15 }}>
+      <div className="font-mono border rounded-lg bg-white max-h-[60vh] overflow-y-auto" style={{ fontSize: 15, display: "grid" }}>
+      <div className="p-5 space-y-2" style={{ gridArea: "1 / 1 / 2 / 2" }}>
       {/* Shop header */}
       <div className="text-center space-y-0.5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -281,7 +295,7 @@ export function ReceiptView({
         </>
       )}
 
-      {customerPackages && customerPackages.length > 0 && (
+      {(customerPackages && customerPackages.length > 0) ? (
         <>
           <br></br>
           <div className="border-t border-dashed border-gray-300" />
@@ -309,35 +323,58 @@ export function ReceiptView({
             </div>
           ))}
         </>
-      )}
+      ) : (customerName || customerPhone) ? (
+        <>
+          <br></br>
+          <div className="border-t border-dashed border-gray-300" />
+          <br></br>
+          {customerCode != null && <p className="font-bold">Customer ID: {customerCode}</p>}
+          {customerName && <p className="font-bold">Customer Name: {customerName}</p>}
+          {customerPhone && <p className="font-bold">Phone Number: {customerPhone}</p>}
+        </>
+      ) : null}
 
       <br></br>
       <div className="border-t border-dashed border-gray-300" />
       <br></br>
       <p className="text-center">Thank you and have a nice day.</p>
       <p className="text-center">Hope to see you again soon.</p>
-    </div>
-
-    {isVoided && (
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden rounded-lg">
-        <span
-          className="text-red-500 font-black opacity-25 tracking-widest select-none whitespace-nowrap"
-          style={{ fontSize: "3.5rem", transform: "rotate(-30deg)" }}
-        >
-          VOIDED
-        </span>
       </div>
-    )}
+
+      {isVoided && (
+        <div style={{ gridArea: "1 / 1 / 2 / 2", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 10 }}>
+          <span
+            className="font-black tracking-widest select-none whitespace-nowrap"
+            style={{ fontSize: "6rem", color: "#dc2626", opacity: 0.38, transform: "rotate(-30deg)", letterSpacing: "0.2em" }}
+          >
+            VOIDED
+          </span>
+        </div>
+      )}
+    </div>
     </div>
 
     {!hideDownloadButton && (
-    <button
-      type="button"
-      onClick={() => triggerPdf()}
-      className="w-full border rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-    >
-      Download PDF
-    </button>
+    <div className={onSend ? "flex gap-2" : undefined}>
+      <button
+        type="button"
+        onClick={() => triggerPdf()}
+        className={`${onSend ? "flex-1" : "w-full"} border rounded-lg px-4 py-2 text-sm font-medium bg-blue-500 text-white hover:bg-gray-800 transition-colors`}
+      >
+        Download PDF
+      </button>
+      {onSend && (
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={sendDisabled}
+          className="flex-1 border rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
+          style={{ backgroundColor: "#25D366", borderColor: "#25D366" }}
+        >
+          {sendLabel ?? "Send via WhatsApp"}
+        </button>
+      )}
+    </div>
     )}
     </div>
   );
