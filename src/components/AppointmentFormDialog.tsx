@@ -1,20 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { format, parse } from "date-fns";
 import { useForm, Controller, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { CalendarIcon, Trash2 } from "lucide-react";
+import { CalendarIcon, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PhoneInput } from "@/components/ui/phone-input";
 import {
   createAppointment,
   updateAppointment,
   deleteAppointment,
+  getCustomers,
+  getPackagesByCustomerId,
+  createCustomer,
 } from "@/lib/actions";
-import { Appointment } from "@/lib/types";
+import { Appointment, Customer } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,6 +92,61 @@ export function AppointmentFormDialog({
 }: Props) {
   const isEditing = !!editingAppointment;
 
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [customerMode, setCustomerMode] = useState<"new" | "existing">("existing");
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  // Fetch customers once when the dialog opens
+  useEffect(() => {
+    if (!open) return;
+    getCustomers().then(setCustomers).catch(() => {});
+  }, [open]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const filteredCustomers = customerSearch.trim() === ""
+    ? []
+    : customers
+        .filter((c) => {
+          const q = customerSearch.toLowerCase();
+          return c.name.toLowerCase().includes(q) || c.contact_number.includes(q);
+        })
+        .slice(0, 8);
+
+  async function handleSelectCustomer(c: Customer) {
+    setSelectedCustomer(c);
+    setValue("customer_name", c.name);
+    setValue("contact_number", c.contact_number);
+    setCustomerSearch(c.name);
+    setShowDropdown(false);
+    // Check if the customer has any active packages
+    try {
+      const pkgs = await getPackagesByCustomerId(c.id);
+      const hasActive = pkgs.some(
+        (p) => !p.completed_at && (
+          p.package?.package_type === "credit"
+            ? (p.remaining_credits ?? 0) > 0
+            : p.remaining_uses > 0
+        )
+      );
+      setValue("has_package", hasActive);
+    } catch {
+      // leave has_package unchanged if fetch fails
+    }
+  }
+
   const [date, setDate] = useState<Date>(
     editingAppointment
       ? new Date(editingAppointment.appointment_date + "T00:00:00")
@@ -160,6 +218,17 @@ export function AppointmentFormDialog({
         }
         return;
       } else {
+        // Register new customer in the database when in "new" mode
+        if (customerMode === "new") {
+          try {
+            await createCustomer({
+              name: data.customer_name,
+              contact_number: data.contact_number,
+            });
+          } catch {
+            // Ignore errors (e.g. duplicate) — appointment still proceeds
+          }
+        }
         const newApptId = await createAppointment(payload);
         toast.success("Appointment added!");
 
@@ -241,6 +310,10 @@ export function AppointmentFormDialog({
 
   function handleClose() {
     reset();
+    setCustomerSearch("");
+    setShowDropdown(false);
+    setCustomerMode("existing");
+    setSelectedCustomer(null);
     onClose();
   }
 
@@ -290,7 +363,12 @@ export function AppointmentFormDialog({
               <Input
                 id="start_time"
                 type="time"
-                {...register("start_time")}
+                {...register("start_time", {
+                  onChange: (e) => {
+                    const newStart = e.target.value;
+                    if (newStart) setValue("end_time", addOneHour(newStart));
+                  },
+                })}
               />
               {errors.start_time && (
                 <p className="text-xs text-red-500">{errors.start_time.message}</p>
@@ -309,44 +387,152 @@ export function AppointmentFormDialog({
             </div>
           </div>
 
-          {/* Customer name */}
-          <div className="space-y-1">
-            <Label htmlFor="customer_name">Customer Name</Label>
-            <textarea
-              id="customer_name"
-              rows={1}
-              placeholder="e.g. Sarah Lim"
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none overflow-hidden"
-              onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
-              {...register("customer_name")}
-            />
-            {errors.customer_name && (
-              <p className="text-xs text-red-500">{errors.customer_name.message}</p>
-            )}
-          </div>
+          {/* Customer mode toggle */}
+          {!isEditing && (
+            <div className="flex rounded-lg border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomerMode("existing");
+                  setSelectedCustomer(null);
+                  setValue("customer_name", "");
+                  setValue("contact_number", "");
+                  setCustomerSearch("");
+                }}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${customerMode === "existing" ? "bg-blue-500 text-white" : "hover:bg-gray-50"}`}
+              >
+                Existing Customer
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomerMode("new");
+                  setSelectedCustomer(null);
+                  setValue("customer_name", "");
+                  setValue("contact_number", "");
+                  setValue("has_package", false);
+                }}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${customerMode === "new" ? "bg-blue-500 text-white" : "hover:bg-gray-50"}`}
+              >
+                New Customer
+              </button>
+            </div>
+          )}
 
-          {/* Contact */}
-          <div className="space-y-1">
-            <Label>Contact Number</Label>
-            <Controller
-              name="contact_number"
-              control={control}
-              render={({ field }) => (
-                <PhoneInput
-                  value={field.value}
-                  onChange={field.onChange}
+          {/* New customer: name + phone fields */}
+          {(isEditing || customerMode === "new") && (
+            <>
+              <div className="space-y-1">
+                <Label htmlFor="customer_name">Customer Name <span className="text-red-500">*</span></Label>
+                <textarea
+                  id="customer_name"
+                  rows={1}
+                  placeholder="e.g. Sarah Lim"
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none overflow-hidden"
+                  onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+                  {...register("customer_name")}
                 />
+                {errors.customer_name && (
+                  <p className="text-xs text-red-500">{errors.customer_name.message}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label>Contact Number <span className="text-red-500">*</span></Label>
+                <Controller
+                  name="contact_number"
+                  control={control}
+                  render={({ field }) => (
+                    <PhoneInput
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
+                />
+                {errors.contact_number && (
+                  <p className="text-xs text-red-500">{errors.contact_number.message}</p>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Existing customer: search */}
+          {!isEditing && customerMode === "existing" && (
+            <div className="space-y-1" ref={searchRef}>
+              {!selectedCustomer ? (
+                <>
+                  <label className="text-sm font-medium leading-none">Search Customer</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search by name or phone…"
+                      value={customerSearch}
+                      onChange={(e) => { setCustomerSearch(e.target.value); setShowDropdown(true); }}
+                      onFocus={() => { if (customerSearch.trim()) setShowDropdown(true); }}
+                      className="flex w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </div>
+                  {showDropdown && filteredCustomers.length > 0 && (
+                    <div className="border rounded-md divide-y max-h-40 overflow-y-auto bg-white shadow-md z-50 relative">
+                      {filteredCustomers.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={() => void handleSelectCustomer(c)}
+                          className="w-full text-left px-3 py-2 text-sm flex justify-between hover:bg-gray-50 transition-colors"
+                        >
+                          <span className="font-medium">{c.name}</span>
+                          <span className="text-gray-400">{c.contact_number}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {errors.customer_name && (
+                    <p className="text-xs text-red-500">Please select a customer</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label className="text-sm font-medium leading-none">Customer</label>
+                  <div className="flex items-center justify-between rounded-md border border-input bg-muted/50 px-3 py-2 text-sm">
+                    <span className="font-medium">{selectedCustomer.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">{selectedCustomer.contact_number}</span>
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedCustomer(null); setValue("customer_name", ""); setValue("contact_number", ""); setValue("has_package", false); setCustomerSearch(""); }}
+                        className="text-muted-foreground hover:text-red-500 transition-colors ml-1"
+                        aria-label="Clear customer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
-            />
-            {errors.contact_number && (
-              <p className="text-xs text-red-500">{errors.contact_number.message}</p>
-            )}
+            </div>
+          )}
+
+          {/* Package */}
+          <div className="space-y-1">
+            <Label>Package</Label>
+            <div className="flex items-center gap-2 rounded-md border border-input px-3 py-2">
+              <input
+                id="has_package"
+                type="checkbox"
+                className="h-4 w-4 accent-primary cursor-pointer"
+                {...register("has_package")}
+              />
+              <label htmlFor="has_package" className="text-sm cursor-pointer select-none">
+                Customer has a package
+              </label>
+            </div>
           </div>
 
           {/* Service + Persons */}
           <div className="grid grid-cols-[1fr_100px] gap-3">
             <div className="space-y-1">
-              <Label htmlFor="service">Service</Label>
+              <Label htmlFor="service">Service <span className="text-red-500">*</span></Label>
               <textarea
                 id="service"
                 rows={1}
@@ -401,22 +587,6 @@ export function AppointmentFormDialog({
               </Select>
             </div>
           )}
-
-          {/* Package */}
-          <div className="space-y-1">
-            <Label>Package</Label>
-            <div className="flex items-center gap-2 rounded-md border border-input px-3 py-2">
-              <input
-                id="has_package"
-                type="checkbox"
-                className="h-4 w-4 accent-primary cursor-pointer"
-                {...register("has_package")}
-              />
-              <label htmlFor="has_package" className="text-sm cursor-pointer select-none">
-                Customer has a package
-              </label>
-            </div>
-          </div>
 
           {/* Notes */}
           <div className="space-y-1">
