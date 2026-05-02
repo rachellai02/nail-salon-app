@@ -357,12 +357,13 @@ export function AppointmentFormDialog({
           </div>
 
           {/* Start + End time */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+          <div className="grid grid-cols-2 gap-3 min-w-0">
+            <div className="space-y-1 min-w-0">
               <Label htmlFor="start_time">Start Time</Label>
               <Input
                 id="start_time"
                 type="time"
+                className="w-full min-w-0"
                 {...register("start_time", {
                   onChange: (e) => {
                     const newStart = e.target.value;
@@ -374,11 +375,12 @@ export function AppointmentFormDialog({
                 <p className="text-xs text-red-500">{errors.start_time.message}</p>
               )}
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 min-w-0">
               <Label htmlFor="end_time">End Time</Label>
               <Input
                 id="end_time"
                 type="time"
+                className="w-full min-w-0"
                 {...register("end_time")}
               />
               {errors.end_time && (
