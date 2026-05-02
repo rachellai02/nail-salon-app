@@ -320,14 +320,14 @@ export function AppointmentFormDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
-      <DialogContent className="w-[80dvw] sm:w-[min(50dvw,calc(100dvw-2rem))] max-w-none flex flex-col max-h-[90dvh]">
+      <DialogContent className="w-[94dvw] sm:w-[min(50dvw,calc(100dvw-2rem))] max-w-none flex flex-col max-h-[90dvh]">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Edit Appointment" : "New Appointment"}
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 pt-1 overflow-y-auto pr-1">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 pt-1 overflow-y-auto overflow-x-hidden pr-1">
 
           {/* Date picker */}
           <div className="space-y-1">

@@ -240,7 +240,7 @@ export function PhoneInput({
         }}
       >
         <PopoverTrigger
-          className="flex items-center gap-1 border border-input rounded-md h-9 px-2.5 text-sm bg-transparent hover:bg-accent transition-colors flex-shrink-0 min-w-[88px] cursor-pointer"
+          className="flex items-center gap-1 border border-input rounded-lg h-8 px-2.5 text-sm bg-transparent hover:bg-accent transition-colors flex-shrink-0 min-w-[88px] cursor-pointer"
         >
           <span>{flagEmoji(selectedCountry.code)}</span>
           <span>{selectedCountry.dial}</span>
