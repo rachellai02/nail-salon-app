@@ -320,7 +320,7 @@ export function AppointmentFormDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
-      <DialogContent className="w-[94dvw] sm:w-[min(50dvw,calc(100dvw-2rem))] max-w-none flex flex-col max-h-[90dvh] overflow-x-hidden">
+      <DialogContent className="sm:max-w-none sm:w-[min(50dvw,calc(100dvw-2rem))] flex flex-col max-h-[90dvh] overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Edit Appointment" : "New Appointment"}
