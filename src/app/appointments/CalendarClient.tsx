@@ -186,7 +186,7 @@ export default function CalendarClient() {
   const [legendOpen, setLegendOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTarget = useRef<'today' | 'week'>('today');
-  const [colWidth, setColWidth] = useState(140);
+  const [colWidth, setColWidth] = useState(0);
 
   // Measure scroll container width — 3 visible cols on mobile (<500px), 7 on desktop
   useEffect(() => {
@@ -397,7 +397,8 @@ export default function CalendarClient() {
 
         {/* Scrollable in both axes */}
         <div ref={scrollRef} className="flex-1 overflow-auto">
-          {/* Inner wrapper sized to exact pixel width */}
+          {/* Don't render grid until column width is measured (avoids mobile zoom on first paint) */}
+          {colWidth > 0 && (
           <div style={{ width: SIDEBAR_WIDTH + TOTAL_DAYS * colWidth }}>
 
           {/* Day header row — sticky vertically */}
@@ -551,7 +552,8 @@ export default function CalendarClient() {
               );
             })}
           </div>
-          </div>{/* end inner width wrapper */}
+          </div>
+          )}
         </div>
       </div>
       </div>{/* end calendar + legend row */}
