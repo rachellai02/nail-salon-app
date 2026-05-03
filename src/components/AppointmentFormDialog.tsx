@@ -358,7 +358,7 @@ export function AppointmentFormDialog({
 
           {/* Start + End time */}
           <div className="flex flex-col sm:flex-row gap-3 w-full">
-            <div className="flex-1 space-y-1 overflow-hidden">
+            <div className="flex-1 space-y-1 min-w-0">
               <Label htmlFor="start_time">Start Time</Label>
               <Input
                 id="start_time"
@@ -375,7 +375,7 @@ export function AppointmentFormDialog({
                 <p className="text-xs text-red-500">{errors.start_time.message}</p>
               )}
             </div>
-            <div className="flex-1 space-y-1 overflow-hidden">
+            <div className="flex-1 space-y-1 min-w-0">
               <Label htmlFor="end_time">End Time</Label>
               <Input
                 id="end_time"
