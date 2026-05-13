@@ -464,5 +464,58 @@ CREATE TABLE IF NOT EXISTS transaction_employee_splits (
 -- MIGRATION: Customer WhatsApp confirmation flag
 -- Run this in Supabase SQL Editor.
 -- -------------------------------------------------------
-ALTER TABLE appointments
-  ADD COLUMN IF NOT EXISTS customer_confirmed BOOLEAN NOT NULL DEFAULT FALSE;
+-- -------------------------------------------------------
+-- MIGRATION: Referral Credit service flag
+-- Run this in Supabase SQL Editor.
+-- -------------------------------------------------------
+ALTER TABLE services
+  ADD COLUMN IF NOT EXISTS is_referral_service BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Mark an existing "5% Referral Credit" service as a referral service
+-- (if the user already created it manually)
+UPDATE services
+  SET is_referral_service = TRUE
+WHERE name = '5% Referral Credit' AND is_referral_service = FALSE;
+
+-- Create the "5% Referral Credit" service under "Referral Program" category
+-- (only if no referral service exists yet — idempotent)
+INSERT INTO services (category_id, name, price, sort_order, is_referral_service)
+SELECT
+  (SELECT id FROM service_categories WHERE name = 'Referral Program' LIMIT 1),
+  '5% Referral Credit',
+  NULL,
+  9999,
+  TRUE
+WHERE
+  (SELECT id FROM service_categories WHERE name = 'Referral Program' LIMIT 1) IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM services WHERE is_referral_service = TRUE
+  );
+
+-- -------------------------------------------------------
+-- MIGRATION: Referral Program
+-- Run this in Supabase SQL Editor.
+-- -------------------------------------------------------
+-- Step 1: Add referred_by_customer_id to customers
+ALTER TABLE customers
+  ADD COLUMN IF NOT EXISTS referred_by_customer_id UUID REFERENCES customers(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_customers_referred_by ON customers(referred_by_customer_id);
+
+-- Step 2: Add is_referral_credit flag to packages
+ALTER TABLE packages
+  ADD COLUMN IF NOT EXISTS is_referral_credit BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Step 3: Also add the flag to employee/nickname column if it exists
+ALTER TABLE employees
+  ADD COLUMN IF NOT EXISTS nickname TEXT;
+
+-- Step 4: Create the system "Referral Credits" package (run once)
+-- This is idempotent — it won't insert if is_referral_credit already exists.
+INSERT INTO packages (name, package_type, total_uses, total_credits, price, description, is_active, is_referral_credit)
+SELECT 'Referral Credits', 'credit', 0, 0, 0,
+       'Credits earned automatically through the referral program. Cannot be purchased.',
+       TRUE, TRUE
+WHERE NOT EXISTS (
+  SELECT 1 FROM packages WHERE is_referral_credit = TRUE
+);

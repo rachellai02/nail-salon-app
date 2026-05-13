@@ -27,6 +27,7 @@ export type Package = {
   price: number;
   description: string | null;
   is_active: boolean;
+  is_referral_credit: boolean;
   created_at: string;
   items?: PackageItem[];
 };
@@ -37,6 +38,7 @@ export type Customer = {
   name: string;
   contact_number: string;
   birthday: string | null;
+  referred_by_customer_id: string | null;
   created_at: string;
 };
 
@@ -174,6 +176,8 @@ export type ReceiptSnapshot = {
   packageDeductions?: { packageName: string; amount: number }[];
   transactionBy?: string;
   packageUsageLogIds?: string[];
+  referralCreditEarned?: number;
+  referralCreditBalance?: number;
 };
 
 export type Transaction = {

@@ -608,6 +608,95 @@ export async function permanentlyDeleteAllArchivedPackages(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────
+// REFERRAL PROGRAM HELPERS (internal)
+// ─────────────────────────────────────────────────────────────
+
+async function getOrCreateReferralCreditPackage(): Promise<string> {
+  const { data: existing } = await supabase
+    .from("packages")
+    .select("id")
+    .eq("is_referral_credit", true)
+    .maybeSingle();
+  if (existing) return existing.id;
+
+  const { data: created, error } = await supabase
+    .from("packages")
+    .insert([{
+      name: "Referral Credits",
+      package_type: "credit",
+      total_uses: 0,
+      total_credits: 0,
+      price: 0,
+      description: "Credits earned automatically through the referral program. Cannot be purchased.",
+      is_active: true,
+      is_referral_credit: true,
+    }])
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return created.id;
+}
+
+export async function addReferralCredits(customerId: string, amount: number, notes: string): Promise<void> {
+  const pkgId = await getOrCreateReferralCreditPackage();
+
+  const { data: existing } = await supabase
+    .from("customer_packages")
+    .select("id, remaining_credits")
+    .eq("customer_id", customerId)
+    .eq("package_id", pkgId)
+    .maybeSingle();
+
+  let cpId: string;
+  let currentCredits: number;
+
+  if (existing) {
+    cpId = existing.id;
+    currentCredits = Number(existing.remaining_credits ?? 0);
+  } else {
+    const { data: created, error: createError } = await supabase
+      .from("customer_packages")
+      .insert([{ customer_id: customerId, package_id: pkgId, remaining_uses: 0, remaining_credits: 0 }])
+      .select("id, remaining_credits")
+      .single();
+    if (createError) throw new Error(createError.message);
+    cpId = created.id;
+    currentCredits = 0;
+  }
+
+  const newTotal = currentCredits + amount;
+  const { error: updateError } = await supabase
+    .from("customer_packages")
+    .update({ remaining_credits: newTotal })
+    .eq("id", cpId);
+  if (updateError) throw new Error(updateError.message);
+
+  await supabase.from("package_usage_logs").insert([{ customer_package_id: cpId, notes }]);
+}
+
+export async function getCustomerReferrals(customerId: string): Promise<Customer[]> {
+  if (!customerId || !UUID_REGEX.test(customerId)) return [];
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("referred_by_customer_id", customerId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getReferralCreditBalance(customerId: string): Promise<number> {
+  const pkgId = await getOrCreateReferralCreditPackage();
+  const { data } = await supabase
+    .from("customer_packages")
+    .select("remaining_credits")
+    .eq("customer_id", customerId)
+    .eq("package_id", pkgId)
+    .maybeSingle();
+  return Number(data?.remaining_credits ?? 0);
+}
+
+// ─────────────────────────────────────────────────────────────
 // CUSTOMERS
 // ─────────────────────────────────────────────────────────────
 
@@ -638,6 +727,7 @@ export async function createCustomer(input: {
   name: string;
   contact_number: string;
   birthday?: string;
+  referred_by_customer_id?: string | null;
 }): Promise<Customer> {
   if (!/^\+?\d+$/.test(input.contact_number)) {
     throw new Error("Contact number must contain numbers only (with optional + prefix)");
@@ -649,9 +739,11 @@ export async function createCustomer(input: {
     .from("customers")
     .insert([
       {
-        ...input,
+        name: input.name,
+        contact_number: input.contact_number,
         birthday: input.birthday?.trim() ? input.birthday : null,
         customer_code: customerCode,
+        referred_by_customer_id: input.referred_by_customer_id ?? null,
       },
     ])
     .select()
@@ -664,7 +756,7 @@ export async function createCustomer(input: {
 
 export async function updateCustomer(
   id: string,
-  input: Partial<Pick<Customer, "name" | "contact_number" | "birthday">>
+  input: Partial<Pick<Customer, "name" | "contact_number" | "birthday" | "referred_by_customer_id">>
 ): Promise<void> {
   if (input.contact_number !== undefined && !/^\+?\d+$/.test(input.contact_number)) {
     throw new Error("Contact number must contain numbers only (with optional + prefix)");
@@ -1749,10 +1841,11 @@ export async function syncPackagesToServicesCategory(): Promise<Service[]> {
   // Clear existing services in the Packages category
   await supabase.from("services").delete().eq("category_id", catId);
 
-  // Get all packages ordered by package_code ascending
+  // Get all packages ordered by package_code ascending (skip referral credit packages)
   const { data: packages, error: pkgError } = await supabase
     .from("packages")
-    .select("name, price, package_code")
+    .select("name, price, package_code, is_referral_credit")
+    .eq("is_referral_credit", false)
     .order("package_code", { ascending: true });
   if (pkgError) throw new Error(pkgError.message);
 
@@ -1837,6 +1930,34 @@ export async function createTransaction(input: {
     .single();
   if (error) throw new Error(error.message);
   revalidatePath("/sales");
+
+  // Award 7% referral credits to the referrer (best-effort — never fail the transaction)
+  // Excluded: only when customer is buying a package (not when paying for services with a package)
+  const isPackageSale = input.payment_type.startsWith("Package Sale");
+  if (input.customer_id && input.total > 0 && !isPackageSale) {
+    try {
+      const customerResult = await supabase
+        .from("customers")
+        .select("referred_by_customer_id, name")
+        .eq("id", input.customer_id)
+        .maybeSingle();
+
+      const customer = customerResult.data;
+
+      // 7% to the referrer — every time any of their referees spends
+      if (customer?.referred_by_customer_id) {
+        const credit7 = Math.ceil(input.total * 0.07);
+        await addReferralCredits(
+          customer.referred_by_customer_id,
+          credit7,
+          `Referral credit earned: +${credit7} credits (7% of RM ${input.total.toFixed(2)}) from ${customer.name} — Receipt #${input.receipt_no}`,
+        );
+      }
+
+      revalidatePath("/packages/customers");
+    } catch { /* non-blocking */ }
+  }
+
   return data;
 }
 
@@ -1868,10 +1989,10 @@ export async function getTransactionsByMonth(year: number, month: number): Promi
 export async function voidTransaction(id: string): Promise<void> {
   if (!UUID_REGEX.test(id)) throw new Error("Invalid transaction id");
 
-  // Fetch the transaction to check for package usage log IDs to reverse
+  // Fetch the transaction to check for package usage log IDs to reverse and referral credits to deduct
   const { data: tx, error: fetchError } = await supabaseAdmin
     .from("sales_transactions")
-    .select("receipt_snapshot")
+    .select("receipt_snapshot, customer_id, total, receipt_no, payment_type")
     .eq("id", id)
     .single();
   if (fetchError) throw new Error(fetchError.message);
@@ -1886,6 +2007,40 @@ export async function voidTransaction(id: string): Promise<void> {
   const logIds: string[] = tx?.receipt_snapshot?.packageUsageLogIds ?? [];
   if (logIds.length > 0) {
     await reverseDeductions(logIds);
+  }
+
+  // Reverse 5% referral credit earned by the customer on this transaction
+  const earned5: number = tx?.receipt_snapshot?.referralCreditEarned ?? 0;
+  if (earned5 > 0 && tx?.customer_id && UUID_REGEX.test(tx.customer_id)) {
+    try {
+      await addReferralCredits(
+        tx.customer_id,
+        -earned5,
+        `Referral credit reversed: -${earned5} credits (void of Receipt #${tx.receipt_no})`,
+      );
+    } catch { /* non-blocking */ }
+  }
+
+  // Reverse 7% referral credit awarded to the referrer on this transaction
+  // Only if the original payment was NOT a package sale (same rule as award)
+  const txTotal: number = Number(tx?.total ?? 0);
+  const wasPackagePayment = (tx?.payment_type ?? "").startsWith("Package Sale");
+  if (txTotal > 0 && !wasPackagePayment && tx?.customer_id && UUID_REGEX.test(tx.customer_id)) {
+    try {
+      const { data: customer } = await supabaseAdmin
+        .from("customers")
+        .select("referred_by_customer_id, name")
+        .eq("id", tx.customer_id)
+        .maybeSingle();
+      if (customer?.referred_by_customer_id) {
+        const credit7 = Math.ceil(txTotal * 0.07);
+        await addReferralCredits(
+          customer.referred_by_customer_id,
+          -credit7,
+          `Referral credit reversed: -${credit7} credits (void of Receipt #${tx.receipt_no} from ${customer.name})`,
+        );
+      }
+    } catch { /* non-blocking */ }
   }
 
   revalidatePath("/sales");

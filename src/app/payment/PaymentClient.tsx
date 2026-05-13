@@ -15,7 +15,7 @@ import { CustomerFormDialog } from "@/components/CustomerFormDialog";
 import { ReceiptView } from "@/components/ReceiptView";
 import { SellPackageDialog } from "@/components/SellPackageDialog";
 import { DeductUseDialog } from "@/components/DeductUseDialog";
-import { createTransaction, getPackagesByCustomerId, getNextReceiptNo, reverseDeductions } from "@/lib/actions";
+import { createTransaction, getPackagesByCustomerId, getNextReceiptNo, reverseDeductions, addReferralCredits, getReferralCreditBalance } from "@/lib/actions";
 import { X, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -130,6 +130,11 @@ export default function PaymentClient({ categories, customers, packages, employe
   }, []);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [sending, setSending] = useState(false);
+  const [employeeSectionOpen, setEmployeeSectionOpen] = useState(true);
+  const [customerSectionOpen, setCustomerSectionOpen] = useState(true);
+  const [applyReferralCredit, setApplyReferralCredit] = useState(false);
+  const [referralCreditEarned, setReferralCreditEarned] = useState<number | null>(null);
+  const [referralCreditBalance, setReferralCreditBalance] = useState<number | null>(null);
 
   function addToCart(svc: Service) {
     const key = `${uid}-${counterRef.current++}-${svc.id}`;
@@ -391,6 +396,7 @@ export default function PaymentClient({ categories, customers, packages, employe
   async function handleCustomerSelect(c: Customer) {
     setSelectedCustomer(c);
     setCustomerQuery("");
+    setCustomerSectionOpen(false);
     setLoadingPackages(true);
     try {
       const pkgs = await getPackagesByCustomerId(c.id);
@@ -413,6 +419,7 @@ export default function PaymentClient({ categories, customers, packages, employe
     setSelectedCustomer(null);
     setCustomerPackages([]);
     setCustomerQuery("");
+    setApplyReferralCredit(false);
   }
 
   function handleSendReceipt() {
@@ -461,6 +468,35 @@ export default function PaymentClient({ categories, customers, packages, employe
     }
   }
 
+  /** Award 5% referral credit to the customer if the checkbox is checked */
+  async function maybeAwardReferralCredit(receiptNo: string): Promise<void> {
+    if (!applyReferralCredit || !selectedCustomer || total <= 0) return;
+    const credit = Math.ceil(total * 0.05);
+    try {
+      await addReferralCredits(
+        selectedCustomer.id,
+        credit,
+        `Referral credit earned: +${credit} credits (5% of RM ${total.toFixed(2)}) — Receipt #${receiptNo}`,
+      );
+    } catch { /* non-blocking */ }
+  }
+
+  // Compute referral credit preview when the receipt-preview step is shown
+  useEffect(() => {
+    if (dialogStep !== "receipt-preview") return;
+    if (!applyReferralCredit || !selectedCustomer || total <= 0) {
+      setReferralCreditEarned(null);
+      setReferralCreditBalance(null);
+      return;
+    }
+    const earned = Math.ceil(total * 0.05);
+    setReferralCreditEarned(earned);
+    getReferralCreditBalance(selectedCustomer.id)
+      .then((balance) => setReferralCreditBalance(balance + earned))
+      .catch(() => setReferralCreditBalance(earned));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogStep]);
+
   async function handleSaveWithoutSend() {
     const isPackagePayment = packageSoldInFlowRef.current;
     try {
@@ -494,10 +530,16 @@ export default function PaymentClient({ categories, customers, packages, employe
           packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
           transactionBy: selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined,
           packageUsageLogIds: pendingDeductionLogIdsRef.current.length > 0 ? [...pendingDeductionLogIdsRef.current] : undefined,
+          referralCreditEarned: applyReferralCredit && referralCreditEarned != null ? referralCreditEarned : undefined,
+          referralCreditBalance: applyReferralCredit && referralCreditBalance != null ? referralCreditBalance : undefined,
         },
       });
     } catch { /* non-blocking */ }
+    await maybeAwardReferralCredit(receiptNo);
     toast.success("Receipt saved.");
+    setApplyReferralCredit(false);
+    setReferralCreditEarned(null);
+    setReferralCreditBalance(null);
     setDialogOpen(false);
     setSelectedCustomer(null);
     clearCart();
@@ -537,6 +579,8 @@ export default function PaymentClient({ categories, customers, packages, employe
           packageDeductions: packageDeductions.length > 0 ? packageDeductions : undefined,
           transactionBy: selectedEmployee?.nickname ?? selectedEmployee?.name ?? undefined,
           packageUsageLogIds: pendingDeductionLogIdsRef.current.length > 0 ? [...pendingDeductionLogIdsRef.current] : undefined,
+          referralCreditEarned: applyReferralCredit && referralCreditEarned != null ? referralCreditEarned : undefined,
+          referralCreditBalance: applyReferralCredit && referralCreditBalance != null ? referralCreditBalance : undefined,
         },
       });
     } catch {
@@ -600,6 +644,10 @@ export default function PaymentClient({ categories, customers, packages, employe
       toast.success("Receipt saved.");
     }
     setSending(false);
+    await maybeAwardReferralCredit(receiptNo);
+    setApplyReferralCredit(false);
+    setReferralCreditEarned(null);
+    setReferralCreditBalance(null);
     setDialogOpen(false);
     setSelectedCustomer(null);
     clearCart();
@@ -709,13 +757,18 @@ export default function PaymentClient({ categories, customers, packages, employe
         </div>
 
         {/* Employee selector */}
-        <div className="px-6 py-3 border-b space-y-2">
-          <p className="text-sm font-semibold text-gray-700">Collected By</p>
+        <details open={employeeSectionOpen} onToggle={(e) => setEmployeeSectionOpen((e.target as HTMLDetailsElement).open)} className="border-b">
+          <summary className="cursor-pointer list-none px-6 py-3 text-sm font-semibold text-gray-700 flex items-center justify-between select-none hover:bg-gray-50">
+            <span>Collected By{selectedEmployee ? `: ${selectedEmployee.nickname ?? selectedEmployee.name}` : ""}</span>
+            <span className="text-xs font-normal text-gray-400">▾</span>
+          </summary>
+          <div className="px-6 pb-3 space-y-2">
           <select
             value={selectedEmployee?.id ?? ""}
             onChange={(e) => {
               const emp = employees.find((emp) => emp.id === e.target.value) ?? null;
               setSelectedEmployee(emp);
+              if (emp) setEmployeeSectionOpen(false);
             }}
             className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-gray-400"
           >
@@ -728,11 +781,16 @@ export default function PaymentClient({ categories, customers, packages, employe
                 </option>
               ))}
           </select>
-        </div>
+          </div>
+        </details>
 
-        {/* Customer selector + active packages */}
-        <div className="px-6 py-3 border-b space-y-2">
-          <p className="text-sm font-semibold text-gray-700">Customer</p>
+        {/* Customer selector */}
+        <details open={customerSectionOpen} onToggle={(e) => setCustomerSectionOpen((e.target as HTMLDetailsElement).open)} className="border-b">
+          <summary className="cursor-pointer list-none px-6 py-3 text-sm font-semibold text-gray-700 flex items-center justify-between select-none hover:bg-gray-50">
+            <span>Customer{selectedCustomer ? `: ${selectedCustomer.name}` : ""}</span>
+            <span className="text-xs font-normal text-gray-400">▾</span>
+          </summary>
+          <div className="px-6 pb-3 space-y-2">
           {!selectedCustomer ? (
             <>
               <Input
@@ -764,61 +822,70 @@ export default function PaymentClient({ categories, customers, packages, employe
               </button>
             </>
           ) : (
-            <>
-              <div className="border rounded-lg px-3 py-2 text-sm bg-gray-50 flex items-center justify-between">
-                <div>
-                  <p className="font-medium">{selectedCustomer.name}</p>
-                  <p className="text-gray-500">{selectedCustomer.contact_number}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCustomerClear}
-                  className="text-xs text-gray-400 hover:text-gray-600 ml-3 flex-shrink-0"
-                >
-                  Change
-                </button>
+            <div className="border rounded-lg px-3 py-2 text-sm bg-gray-50 flex items-center justify-between">
+              <div>
+                <p className="font-medium">{selectedCustomer.name}</p>
+                <p className="text-gray-500">{selectedCustomer.contact_number}</p>
               </div>
-
-              {loadingPackages && (
-                <p className="text-xs text-gray-400">Loading packages…</p>
-              )}
-              {!loadingPackages && customerPackages.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Active Packages</p>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {customerPackages.map((cp) => (
-                      <div key={cp.id} className="border rounded-lg px-3 py-2 bg-white">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-sm">{cp.package?.name ?? "Package"}</span>
-                          <span className="text-xs text-gray-400 capitalize">{cp.package?.package_type ?? "services"}</span>
-                        </div>
-                        {cp.package?.package_type === "credit" ? (
-                          <p className="text-xs text-gray-600">
-                            Credits: <span className="font-semibold">{(cp.remaining_credits ?? 0).toFixed(2)}</span> remaining
-                          </p>
-                        ) : (
-                          <ul className="space-y-0.5">
-                            {(cp.items ?? []).map((item) => (
-                              <li key={item.id} className="flex justify-between text-xs text-gray-600">
-                                <span>{item.service_name}</span>
-                                <span className={item.remaining_uses === 0 ? "text-gray-300" : "font-semibold"}>
-                                  {item.remaining_uses}/{item.total_uses} left
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {!loadingPackages && customerPackages.length === 0 && (
-                <p className="text-xs text-gray-400">No active packages.</p>
-              )}
-            </>
+              <button
+                type="button"
+                onClick={handleCustomerClear}
+                className="text-xs text-gray-400 hover:text-gray-600 ml-3 flex-shrink-0"
+              >
+                Change
+              </button>
+            </div>
           )}
-        </div>
+          </div>
+        </details>
+
+        {/* Active packages — always visible once customer is selected */}
+        {selectedCustomer && (
+          <div className="px-6 py-3 border-b">
+            {loadingPackages && (
+              <p className="text-xs text-gray-400">Loading packages…</p>
+            )}
+            {!loadingPackages && customerPackages.length > 0 && (
+              <details open className="space-y-1.5">
+                <summary className="cursor-pointer list-none text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center justify-between select-none hover:text-gray-700">
+                  <span>Active Packages</span>
+                  <span className="normal-case font-normal text-gray-400">▾</span>
+                </summary>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto mt-1">
+                  {customerPackages
+                    .filter((cp) => !cp.package?.is_referral_credit)
+                    .map((cp) => (
+                    <div key={cp.id} className="border rounded-lg px-3 py-2 bg-white">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold text-sm">{cp.package?.name ?? "Package"}</span>
+                        <span className="text-xs text-gray-400 capitalize">{cp.package?.package_type ?? "services"}</span>
+                      </div>
+                      {cp.package?.package_type === "credit" ? (
+                        <p className="text-xs text-gray-600">
+                          Credits: <span className="font-semibold">{(cp.remaining_credits ?? 0).toFixed(2)}</span> remaining
+                        </p>
+                      ) : (
+                        <ul className="space-y-0.5">
+                          {(cp.items ?? []).map((item) => (
+                            <li key={item.id} className="flex justify-between text-xs text-gray-600">
+                              <span>{item.service_name}</span>
+                              <span className={item.remaining_uses === 0 ? "text-gray-300" : "font-semibold"}>
+                                {item.remaining_uses}/{item.total_uses} left
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {!loadingPackages && customerPackages.length === 0 && (
+              <p className="text-xs text-gray-400">No active packages.</p>
+            )}
+          </div>
+        )}
 
         {/* Cart items */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
@@ -894,6 +961,19 @@ export default function PaymentClient({ categories, customers, packages, employe
               <span className="text-base font-semibold">Total</span>
               <span className="text-xl font-bold">{total.toFixed(2)}</span>
             </div>
+            {selectedCustomer && total > 0 && (
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={applyReferralCredit}
+                  onChange={(e) => setApplyReferralCredit(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-600"
+                />
+                <span className="text-sm text-emerald-700">
+                  5% Referral Credit (+{Math.ceil(total * 0.05)} credits)
+                </span>
+              </label>
+            )}
             <Button className="w-full" disabled={hasEmptyPrice || hasEmptyName} onClick={openPaymentDialog}>
               Create Payment
             </Button>
@@ -1379,15 +1459,16 @@ export default function PaymentClient({ categories, customers, packages, employe
               <ReceiptView
                 receiptNo={receiptNo}
                 date={receiptDate}
-                items={cart.map((item) => {
-                  const p = parseFloat(item.price);
-                  const q = parseFloat(item.qty);
-                  return {
-                    qty: isNaN(q) ? 0 : q,
-                    name: item.service.name,
-                    subtotal: isNaN(p) || isNaN(q) ? 0 : p * q,
-                  };
-                })}
+                items={cart
+                  .map((item) => {
+                    const p = parseFloat(item.price);
+                    const q = parseFloat(item.qty);
+                    return {
+                      qty: isNaN(q) ? 0 : q,
+                      name: item.service.name,
+                      subtotal: isNaN(p) || isNaN(q) ? 0 : p * q,
+                    };
+                  })}
                 paymentType={paymentType ?? ""}
                 total={total}
                 cashReceived={paymentType === "Cash" ? parseFloat(cashReceived) : null}
@@ -1415,6 +1496,8 @@ export default function PaymentClient({ categories, customers, packages, employe
                 customerPhone={selectedCustomer?.contact_number}
                 customerCode={selectedCustomer?.customer_code ?? null}
                 hideDownloadButton={true}
+                referralCreditEarned={referralCreditEarned ?? undefined}
+                referralCreditBalance={referralCreditBalance ?? undefined}
               />
 
               <Button className="w-full" disabled={sending} onClick={handleDoSend}>

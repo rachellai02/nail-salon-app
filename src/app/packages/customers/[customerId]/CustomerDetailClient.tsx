@@ -45,6 +45,9 @@ type Props = {
   customerPackages: CustomerPackage[];
   allPackages: Package[];
   archivedCustomerPackages: ArchivedCustomerPackage[];
+  referrer?: Customer | null;
+  referrals?: Customer[];
+  allCustomers?: Customer[];
 };
 
 export default function CustomerDetailClient({
@@ -52,6 +55,9 @@ export default function CustomerDetailClient({
   customerPackages,
   allPackages,
   archivedCustomerPackages,
+  referrer,
+  referrals = [],
+  allCustomers,
 }: Props) {
   const [deductTarget, setDeductTarget] = useState<CustomerPackage | null>(null);
   const [historyTarget, setHistoryTarget] = useState<CustomerPackage | null>(null);
@@ -73,6 +79,8 @@ export default function CustomerDetailClient({
     const isCredit = cp.package?.package_type === 'credit';
     return isCredit ? (cp.remaining_credits ?? 1) > 0 : cp.remaining_uses > 0;
   });
+  const referralCreditPackage = activeCustomerPackages.find((cp) => cp.package?.is_referral_credit);
+  const regularActivePackages = activeCustomerPackages.filter((cp) => !cp.package?.is_referral_credit);
   const completedCustomerPackages = customerPackages.filter((cp) => {
     const isCredit = cp.package?.package_type === 'credit';
     return isCredit ? (cp.remaining_credits ?? 1) <= 0 : cp.remaining_uses <= 0;
@@ -227,8 +235,26 @@ export default function CustomerDetailClient({
                     {formatDateMY(customer.birthday)}
                   </p>
                 )}
+                {referrer && (
+                  <p>
+                    <span className="font-medium">Referred by:</span>{" "}
+                    <a
+                      href={`/packages/customers/${referrer.id}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {referrer.name}
+                    </a>
+                    <span className="text-gray-400 ml-1 text-sm">({referrer.contact_number})</span>
+                  </p>
+                )}
+                {referrals.length > 0 && (
+                  <p>
+                    <span className="font-medium">Referred customers:</span>{" "}
+                    <span className="text-green-700 font-semibold">{referrals.length}</span>
+                  </p>
+                )}
                 <p>
-                  <span className="font-medium">Total Packages:</span> {customerPackages.length}
+                  <span className="font-medium">Total Packages:</span> {regularActivePackages.length}
                 </p>
               </div>
             </div>
@@ -246,6 +272,66 @@ export default function CustomerDetailClient({
           </div>
         </div>
       </div>
+
+      {/* Referral Credits Section */}
+      {referralCreditPackage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-5 mb-6">
+          <div className="flex items-center gap-6">
+            <div>
+              <h2 className="text-lg font-semibold text-emerald-800">Referral Credits</h2>
+              <p className="text-sm text-emerald-600 mt-0.5">Earned from referrals and purchases</p>
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-3xl font-bold text-emerald-700">{referralCreditPackage.remaining_credits ?? 0}</span>
+              <span className="text-sm text-emerald-600">credits</span>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-100" onClick={() => void handleOpenHistory(referralCreditPackage)}>
+              View History
+            </Button>
+            <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800 text-white" onClick={() => setDeductTarget(referralCreditPackage)}>
+              Deduct Credits
+            </Button>
+          </div>
+          {referrals.length > 0 && (
+            <details className="mt-4">
+              <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-900 select-none">
+                <ChevronDownIcon className="size-4" />
+                Referred Customers ({referrals.length})
+              </summary>
+              <div className="mt-2 rounded-md border border-emerald-200 overflow-hidden bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Customer ID</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Contact</TableHead>
+                      <TableHead>Joined</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {referrals.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell><code className="text-xs bg-gray-100 px-2 py-1 rounded">{r.customer_code}</code></TableCell>
+                        <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell className="text-gray-500 text-sm">{r.contact_number}</TableCell>
+                        <TableCell className="text-gray-500 text-sm">{formatDateMY(r.created_at)}</TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" onClick={() => router.push(`/packages/customers/${r.id}`)}>
+                            View Profile
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </details>
+          )}
+        </div>
+      )}
 
       {/* Packages Table */}
       <div className="bg-white rounded-lg border">
@@ -267,14 +353,14 @@ export default function CustomerDetailClient({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activeCustomerPackages.length === 0 && (
+            {regularActivePackages.length === 0 && (
               <TableRow>
                 <TableCell colSpan={9} className="text-center text-gray-400 py-10">
                   No active packages.
                 </TableCell>
               </TableRow>
             )}
-            {activeCustomerPackages.map((cp) => {
+            {regularActivePackages.map((cp) => {
               const isExpired = !!cp.expiry_date && todayLocal >= cp.expiry_date;
               return (
                 <TableRow key={cp.id}>
@@ -679,6 +765,7 @@ export default function CustomerDetailClient({
         open={editCustomerOpen}
         onClose={handleEditCustomerClose}
         editingCustomer={customer}
+        allCustomers={allCustomers}
       />
     </div>
   );

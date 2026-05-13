@@ -73,7 +73,7 @@ export function SellPackageDialog({ open, onClose, packages, customers, defaultC
   const [selectedExpiryYears, setSelectedExpiryYears] = useState<string>("1");
   const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | "">("");
   const [quantity, setQuantity] = useState(1);
-  const activePackages = packages.filter((p) => p.is_active);
+  const activePackages = packages.filter((p) => p.is_active && !p.is_referral_credit);
   
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
   const selectedPackage = activePackages.find(p => p.id === selectedPackageId);

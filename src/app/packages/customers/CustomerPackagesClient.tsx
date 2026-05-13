@@ -152,6 +152,7 @@ export default function CustomerPackagesClient({
       <CustomerFormDialog
         open={registerOpen}
         onClose={handleRegisterClose}
+        allCustomers={customers}
       />
     </div>
   );

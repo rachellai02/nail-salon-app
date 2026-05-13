@@ -631,6 +631,8 @@ export default function SalesClient({ transactions, year, month, summaryTransact
                 transactionBy={receiptTx.receipt_snapshot?.transactionBy}
                 customerName={receiptTx.customer_name ?? undefined}
                 customerPhone={receiptTx.customer_phone ?? undefined}
+                referralCreditEarned={receiptTx.receipt_snapshot?.referralCreditEarned}
+                referralCreditBalance={receiptTx.receipt_snapshot?.referralCreditBalance}
                 onSend={receiptTx.customer_phone ? () => void handleSendToCustomer(receiptTx) : undefined}
                 sendLabel={sendingReceipt ? "Sending…" : "Send to Customer via WhatsApp"}
                 sendDisabled={sendingReceipt}

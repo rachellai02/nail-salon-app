@@ -85,6 +85,8 @@ type ReceiptViewProps = {
   onSend?: () => void;
   sendLabel?: string;
   sendDisabled?: boolean;
+  referralCreditEarned?: number;
+  referralCreditBalance?: number;
 };
 
 export function ReceiptView({
@@ -111,6 +113,8 @@ export function ReceiptView({
   onSend,
   sendLabel,
   sendDisabled,
+  referralCreditEarned,
+  referralCreditBalance,
 }: ReceiptViewProps) {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const addrParts = SHOP_ADDR.split(",");
@@ -295,6 +299,13 @@ export function ReceiptView({
         </>
       )}
 
+      {referralCreditEarned != null && referralCreditEarned > 0 && (
+        <div className="flex justify-between font-semibold">
+          <span>Referral Credit Earned</span>
+          <span>+ {referralCreditEarned} credits</span>
+        </div>
+      )}
+
       {(customerPackages && customerPackages.length > 0) ? (
         <>
           <br></br>
@@ -305,23 +316,45 @@ export function ReceiptView({
           <p className="font-bold">Phone Number: {customerPackages[0]?.customer?.contact_number ?? "N/A"}</p>
           <br></br>
           <p className="font-bold">Active Packages:</p>
-          {customerPackages.map((cp) => (
-            <div key={cp.id} className="space-y-0.5 mt-1">
-              <p className="font-semibold">{cp.package?.name ?? "Package"}</p>
-              {cp.package?.package_type === "credit" ? (
-                <p className="pl-2">Credits: {(cp.remaining_credits ?? 0)} remaining</p>
-              ) : (
-                <div className="pl-2 space-y-0.5">
-                  {(cp.items ?? []).map((item) => (
-                    <div key={item.id} className="flex justify-between">
-                      <span>{item.service_name}</span>
-                      <span>{item.remaining_uses}/{item.total_uses} left</span>
-                    </div>
-                  ))}
+          {customerPackages
+            .filter((cp) => !cp.package?.is_referral_credit)
+            .map((cp) => (
+              <div key={cp.id} className="space-y-0.5 mt-1">
+                <p className="font-semibold">{cp.package?.name ?? "Package"}</p>
+                {cp.package?.package_type === "credit" ? (
+                  <p className="pl-2">Credits: {(cp.remaining_credits ?? 0)} remaining</p>
+                ) : (
+                  <div className="pl-2 space-y-0.5">
+                    {(cp.items ?? []).map((item) => (
+                      <div key={item.id} className="flex justify-between">
+                        <span>{item.service_name}</span>
+                        <span>{item.remaining_uses}/{item.total_uses} left</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          {/* Show referral credits — use updated balance if credits were earned this payment,
+              otherwise fall back to the value in customerPackages */}
+          {(() => {
+            if (referralCreditBalance != null) {
+              return referralCreditBalance > 0 ? (
+                <div className="space-y-0.5 mt-1">
+                  <p className="font-semibold">Referral Credits</p>
+                  <p className="pl-2">Balance: {referralCreditBalance} credits</p>
                 </div>
-              )}
-            </div>
-          ))}
+              ) : null;
+            }
+            const refPkg = customerPackages.find((cp) => cp.package?.is_referral_credit);
+            if (!refPkg || (refPkg.remaining_credits ?? 0) <= 0) return null;
+            return (
+              <div className="space-y-0.5 mt-1">
+                <p className="font-semibold">Referral Credits</p>
+                <p className="pl-2">Balance: {refPkg.remaining_credits} credits</p>
+              </div>
+            );
+          })()}
         </>
       ) : (customerName || customerPhone) ? (
         <>
@@ -331,6 +364,16 @@ export function ReceiptView({
           {customerCode != null && <p className="font-bold">Customer ID: {customerCode}</p>}
           {customerName && <p className="font-bold">Customer Name: {customerName}</p>}
           {customerPhone && <p className="font-bold">Phone Number: {customerPhone}</p>}
+          {referralCreditBalance != null && referralCreditBalance > 0 && (
+            <>
+              <br></br>
+              <p className="font-bold">Active Packages:</p>
+              <div className="space-y-0.5 mt-1">
+                <p className="font-semibold">Referral Credits</p>
+                <p className="pl-2">Balance: {referralCreditBalance} credits</p>
+              </div>
+            </>
+          )}
         </>
       ) : null}
 

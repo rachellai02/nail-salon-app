@@ -3,6 +3,8 @@ import {
   getCustomerById,
   getPackagesByCustomerId,
   getPackages,
+  getCustomerReferrals,
+  getCustomers,
 } from "@/lib/actions";
 import { notFound } from "next/navigation";
 import CustomerDetailClient from "./CustomerDetailClient";
@@ -21,16 +23,23 @@ export default async function CustomerDetailPage({
     notFound();
   }
 
-  const [customer, customerPackages, allPackages, archivedCustomerPackages] = await Promise.all([
+  const [customer, customerPackages, allPackages, archivedCustomerPackages, referrals, allCustomers] = await Promise.all([
     getCustomerById(customerId),
     getPackagesByCustomerId(customerId),
     getPackages(),
     getArchivedCustomerPackagesByCustomerId(customerId),
+    getCustomerReferrals(customerId),
+    getCustomers(),
   ]);
 
   if (!customer) {
     notFound();
   }
+
+  // Resolve the referrer from the full customer list
+  const referrer = customer.referred_by_customer_id
+    ? (allCustomers.find((c) => c.id === customer.referred_by_customer_id) ?? null)
+    : null;
 
   return (
     <CustomerDetailClient
@@ -38,6 +47,9 @@ export default async function CustomerDetailPage({
       customerPackages={customerPackages}
       allPackages={allPackages}
       archivedCustomerPackages={archivedCustomerPackages}
+      referrer={referrer}
+      referrals={referrals}
+      allCustomers={allCustomers}
     />
   );
 }
