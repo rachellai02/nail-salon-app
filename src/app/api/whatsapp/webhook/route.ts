@@ -49,8 +49,16 @@ export async function POST(req: NextRequest) {
       if (payload.toLowerCase().includes("confirm") || isUUID(payload)) {
         await sendText(from, "Thanks and see you! 💅");
         await markCustomerConfirmed(from, isUUID(payload) ? payload : undefined);
+      } else if (payload.toLowerCase().includes("edit") || payload.toLowerCase().includes("cancel")) {
+        await sendDefaultReply(from);
+        console.log(`[wa-webhook] default_reply sent for Edit/Cancel button from ${from}`);
       }
-      // Edit Booking / Cancel Booking — no auto-reply, handle manually
+    }
+
+    // Auto-reply with default_reply template for any regular incoming message
+    if (type !== "button") {
+      await sendDefaultReply(from);
+      console.log(`[wa-webhook] default_reply template sent to ${from}`);
     }
 
     return NextResponse.json({ status: "ok" });
@@ -134,6 +142,37 @@ async function markCustomerConfirmed(from: string, appointmentId?: string) {
     else console.log(`[wa-webhook] customer_confirmed=true for appt ${upcoming.id} (${upcoming.appointment_date} ${upcoming.start_time})`);
   } catch (err) {
     console.error("[wa-webhook] markCustomerConfirmed error", err);
+  }
+}
+
+async function sendDefaultReply(to: string) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
+  const accessToken   = process.env.WHATSAPP_ACCESS_TOKEN!;
+  const version       = process.env.WHATSAPP_API_VERSION ?? "v25.0";
+
+  const res = await fetch(
+    `https://graph.facebook.com/${version}/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: "default_reply",
+          language: { code: "en_US" },
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json();
+    console.error("[wa-webhook] sendDefaultReply failed", err);
   }
 }
 
